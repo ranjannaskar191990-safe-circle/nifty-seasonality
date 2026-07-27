@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import yahooFinance from 'yahoo-finance2';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -20,10 +19,12 @@ export async function GET(request: Request) {
       interval: '1mo'
     };
     
-    // Unwrap the module safely
-    const yf = (yahooFinance as any).default || yahooFinance;
+    // THE SLEDGEHAMMER FIX: 
+    // Dynamically import the module at runtime to completely bypass 
+    // Next.js/Turbopack's bundling confusion.
+    const yfModule = await import('yahoo-finance2');
+    const yf = yfModule.default || yfModule;
     
-    // Fetch the 10-year data directly (Removed the suppressNotices line!)
     const yahooSymbol = `${symbol}.NS`;
     const result = await yf.historical(yahooSymbol, queryOptions);
     
