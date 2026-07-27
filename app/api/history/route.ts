@@ -20,12 +20,10 @@ export async function GET(request: Request) {
       interval: '1mo'
     };
     
-    // THE FIX: Unwrap the module if Vercel nested it inside 'default'
+    // Unwrap the module safely
     const yf = (yahooFinance as any).default || yahooFinance;
     
-    // Suppress notices
-    yf.suppressNotices(['yahooSurvey']);
-    
+    // Fetch the 10-year data directly (Removed the suppressNotices line!)
     const yahooSymbol = `${symbol}.NS`;
     const result = await yf.historical(yahooSymbol, queryOptions);
     
