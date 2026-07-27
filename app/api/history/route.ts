@@ -14,18 +14,25 @@ export async function GET(request: Request) {
     const startDate = new Date();
     startDate.setFullYear(endDate.getFullYear() - 10);
 
-    const queryOptions = {
+    const queryOptions: any = {
       period1: startDate,
       period2: endDate,
       interval: '1mo'
     };
     
-    // Nifty stocks on Yahoo Finance require the .NS extension
+    // THE FIX: Unwrap the module if Vercel nested it inside 'default'
+    const yf = (yahooFinance as any).default || yahooFinance;
+    
+    // Suppress notices
+    yf.suppressNotices(['yahooSurvey']);
+    
     const yahooSymbol = `${symbol}.NS`;
-    const result = await yahooFinance.historical(yahooSymbol, queryOptions);
+    const result = await yf.historical(yahooSymbol, queryOptions);
     
     return NextResponse.json(result);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to fetch historical data" }, { status: 500 });
+    return NextResponse.json({ 
+      error: error.message || String(error) 
+    }, { status: 500 });
   }
 }
