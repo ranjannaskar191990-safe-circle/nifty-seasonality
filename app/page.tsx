@@ -17,6 +17,11 @@ interface SeasonalityResult {
   totalYearsCounted: number;
 }
 
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June", 
+  "July", "August", "September", "October", "November", "December"
+];
+
 export default function Home() {
   const [dashboardData, setDashboardData] = useState<StockData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,8 +29,9 @@ export default function Home() {
   const [seasonalityCache, setSeasonalityCache] = useState<Record<string, SeasonalityResult>>({});
   const [analyzingSymbol, setAnalyzingSymbol] = useState<string | null>(null);
 
-  const TARGET_MONTH = 7; 
-  const TARGET_MONTH_NAME = "August";
+  // New State for Search and Month Filter
+  const [selectedMonth, setSelectedMonth] = useState<number>(7); // Defaults to August (index 7)
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
   useEffect(() => {
     async function fetchNiftyList() {
@@ -45,12 +51,17 @@ export default function Home() {
     fetchNiftyList();
   }, []);
 
+  // Clear the cache whenever the user changes the target month
+  function handleMonthChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    setSelectedMonth(Number(e.target.value));
+    setSeasonalityCache({}); 
+  }
+
   async function analyzeStock(symbol: string) {
     setAnalyzingSymbol(symbol);
     try {
       const response = await fetch(`/api/history?symbol=${symbol}`);
       
-      // If the server fails, we extract the EXACT error message now
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Unknown server error");
@@ -65,7 +76,7 @@ export default function Home() {
 
       history.forEach((monthData: any) => {
         const date = new Date(monthData.date);
-        if (date.getMonth() === TARGET_MONTH) {
+        if (date.getMonth() === selectedMonth) {
           validYears++;
           const open = monthData.open;
           const close = monthData.close;
@@ -95,28 +106,65 @@ export default function Home() {
 
     } catch (error: any) {
       console.error(`Error analyzing ${symbol}:`, error);
-      // This will now pop up with the specific server error!
       alert(`SYSTEM ERROR FOR ${symbol}:\n\n${error.message}`);
     } finally {
       setAnalyzingSymbol(null);
     }
   }
 
+  // Filter the data based on the search query
+  const filteredData = dashboardData.filter((stock) => {
+    if (!stock['Company Name']) return false;
+    const matchesSearch = 
+      stock['Company Name'].toLowerCase().includes(searchQuery.toLowerCase()) ||
+      stock['Symbol'].toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesSearch;
+  });
+
   return (
     <main className="p-8 max-w-7xl mx-auto min-h-screen bg-gray-50">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">10-Year Seasonality System</h1>
-        <p className="text-gray-600 mt-2">Target Month: <span className="font-semibold text-blue-600">{TARGET_MONTH_NAME}</span> (Emotionless Execution)</p>
+        <p className="text-gray-600 mt-2 mb-6">Emotionless Execution Engine</p>
+        
+        {/* NEW CONTROLS SECTION */}
+        <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Search Stock</label>
+            <input 
+              type="text" 
+              placeholder="e.g. Reliance, ITC, BPCL..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+          
+          <div className="md:w-64">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Target Month</label>
+            <select 
+              value={selectedMonth} 
+              onChange={handleMonthChange}
+              className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white cursor-pointer"
+            >
+              {MONTHS.map((month, index) => (
+                <option key={month} value={index}>{month}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       {loading && <p className="text-gray-600 font-medium animate-pulse">Loading Nifty 200 universe...</p>}
       {error && <div className="p-4 bg-red-100 text-red-700 rounded-lg shadow-sm">Error: {error}</div>}
 
       {!loading && !error && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {dashboardData
-            .filter((stock) => stock['Company Name'])
-            .map((stock, index) => {
+        <>
+          <div className="mb-4 text-sm text-gray-500 font-medium">
+            Showing {filteredData.length} stocks
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredData.map((stock, index) => {
               const symbol = stock['Symbol'];
               const stats = seasonalityCache[symbol];
               const isAnalyzing = analyzingSymbol === symbol;
@@ -157,13 +205,14 @@ export default function Home() {
                       disabled={isAnalyzing}
                       className="w-full py-2 px-4 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 disabled:bg-gray-300 transition-colors"
                     >
-                      {isAnalyzing ? "Analyzing 10 Years..." : `Analyze for ${TARGET_MONTH_NAME}`}
+                      {isAnalyzing ? "Analyzing..." : `Analyze for ${MONTHS[selectedMonth]}`}
                     </button>
                   )}
                 </div>
               );
             })}
-        </div>
+          </div>
+        </>
       )}
     </main>
   );
