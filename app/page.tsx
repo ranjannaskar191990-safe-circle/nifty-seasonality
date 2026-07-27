@@ -15,6 +15,7 @@ interface SeasonalityResult {
   averageReturn: number;
   maxDrawdown: number;
   totalYearsCounted: number;
+  convictionScore: number;
 }
 
 const MONTHS = [
@@ -29,11 +30,12 @@ export default function Home() {
   const [seasonalityCache, setSeasonalityCache] = useState<Record<string, SeasonalityResult>>({});
   const [analyzingSymbol, setAnalyzingSymbol] = useState<string | null>(null);
 
-  // Search, Month Filter, and Scanning States
+  // Search, Filters, and Scanning States
   const [selectedMonth, setSelectedMonth] = useState<number>(7);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isScanningAll, setIsScanningAll] = useState(false);
   const [scanProgress, setScanProgress] = useState("");
+  const [showTop5, setShowTop5] = useState(false);
 
   useEffect(() => {
     async function fetchNiftyList() {
@@ -56,9 +58,9 @@ export default function Home() {
   function handleMonthChange(e: React.ChangeEvent<HTMLSelectElement>) {
     setSelectedMonth(Number(e.target.value));
     setSeasonalityCache({}); 
+    setShowTop5(false); // Reset Top 5 view when changing months
   }
 
-  // Modified to accept a 'silent' flag so it doesn't pop up alerts during a mass scan
   async function analyzeStock(symbol: string, silent = false) {
     if (!silent) setAnalyzingSymbol(symbol);
     try {
@@ -94,6 +96,10 @@ export default function Home() {
 
       const winRate = validYears > 0 ? (wins / validYears) * 100 : 0;
       const averageReturn = wins > 0 ? (totalReturnOnWins / wins) : 0;
+      
+      // THE RATING ALGORITHM: 70% weight to Win Rate, 30% weight to Data Completeness (out of 10 years)
+      const dataCompletenessScore = (validYears / 10) * 100;
+      const convictionScore = Math.round((winRate * 0.7) + (dataCompletenessScore * 0.3));
 
       setSeasonalityCache(prev => ({
         ...prev,
@@ -101,7 +107,8 @@ export default function Home() {
           winRate,
           averageReturn,
           maxDrawdown: worstDrop,
-          totalYearsCounted: validYears
+          totalYearsCounted: validYears,
+          convictionScore
         }
       }));
 
@@ -113,16 +120,14 @@ export default function Home() {
     }
   }
 
-  // The Mass Scanner Engine
   async function runFullScan() {
     setIsScanningAll(true);
-    // Only scan stocks that haven't been analyzed yet
+    setShowTop5(false); // Show all while scanning
     const stocksToScan = dashboardData
       .filter((s) => s['Company Name'] && !seasonalityCache[s['Symbol']]);
     
     let completed = 0;
     
-    // Process in small batches of 5 to avoid overwhelming the browser network
     const BATCH_SIZE = 5;
     for (let i = 0; i < stocksToScan.length; i += BATCH_SIZE) {
       const batch = stocksToScan.slice(i, i + BATCH_SIZE);
@@ -148,54 +153,69 @@ export default function Home() {
     return matchesSearch;
   });
 
-  // 2. LIVE SORTING ENGINE: Best setups bubble to the top automatically
+  // 2. LIVE SORTING ENGINE: Sort by Conviction Score first
   const sortedData = [...filteredData].sort((a, b) => {
     const statsA = seasonalityCache[a['Symbol']];
     const statsB = seasonalityCache[b['Symbol']];
 
     if (statsA && statsB) {
-      // Rule 1: Highest Win Rate first
-      if (statsB.winRate !== statsA.winRate) {
-        return statsB.winRate - statsA.winRate;
+      // Primary: Conviction Score (Rating)
+      if (statsB.convictionScore !== statsA.convictionScore) {
+        return statsB.convictionScore - statsA.convictionScore;
       }
-      // Rule 2: If Win Rate is a tie, Highest Average Reward first
+      // Tie-Breaker: Highest Average Reward
       return statsB.averageReturn - statsA.averageReturn;
     }
     
-    // Analyzed stocks always float above un-analyzed stocks
     if (statsA && !statsB) return -1;
     if (!statsA && statsB) return 1;
     
-    return 0; // Keep original order for un-analyzed
+    return 0; 
   });
+
+  // 3. TOP 5 TOGGLE LOGIC
+  const finalDisplayData = showTop5 
+    ? sortedData.filter(stock => seasonalityCache[stock['Symbol']]).slice(0, 5)
+    : sortedData;
 
   return (
     <main className="p-8 max-w-7xl mx-auto min-h-screen bg-gray-50">
       <div className="mb-8">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">10-Year Seasonality System</h1>
-            <p className="text-gray-600 mt-2 mb-6">Emotionless Execution Engine</p>
+            <p className="text-gray-600 mt-2">Emotionless Execution Engine</p>
           </div>
           
-          {/* MASS SCAN BUTTON */}
-          <button 
-            onClick={runFullScan}
-            disabled={isScanningAll || loading}
-            className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors shadow-sm flex flex-col items-center justify-center"
-          >
-            {isScanningAll ? (
-              <>
-                <span>Scanning Market...</span>
-                <span className="text-xs font-normal opacity-80">{scanProgress}</span>
-              </>
-            ) : (
-              "Run Full Market Scan"
-            )}
-          </button>
+          <div className="flex gap-3">
+            {/* TOP 5 BUTTON */}
+            <button
+              onClick={() => setShowTop5(!showTop5)}
+              disabled={isScanningAll || Object.keys(seasonalityCache).length === 0}
+              className={`px-4 py-3 font-bold rounded-lg transition-colors shadow-sm ${showTop5 ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'} disabled:opacity-50`}
+            >
+              {showTop5 ? "Show All Scanned" : "⭐ Top 5 Setups"}
+            </button>
+
+            {/* MASS SCAN BUTTON */}
+            <button 
+              onClick={runFullScan}
+              disabled={isScanningAll || loading}
+              className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors shadow-sm flex flex-col items-center justify-center min-w-[200px]"
+            >
+              {isScanningAll ? (
+                <>
+                  <span>Scanning Market...</span>
+                  <span className="text-xs font-normal opacity-80">{scanProgress}</span>
+                </>
+              ) : (
+                "Run Full Market Scan"
+              )}
+            </button>
+          </div>
         </div>
         
-        <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+        <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-6">
           <div className="flex-1">
             <label className="block text-sm font-medium text-gray-700 mb-1">Search Stock</label>
             <input 
@@ -204,6 +224,7 @@ export default function Home() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              disabled={showTop5}
             />
           </div>
           
@@ -228,23 +249,31 @@ export default function Home() {
       {!loading && !error && (
         <>
           <div className="mb-4 text-sm text-gray-500 font-medium flex justify-between">
-            <span>Showing {sortedData.length} stocks</span>
-            {Object.keys(seasonalityCache).length > 0 && (
-              <span className="text-blue-600">Sorted by Win Rate (High to Low)</span>
+            <span>Showing {finalDisplayData.length} stocks {showTop5 && "(Top 5 Filter Active)"}</span>
+            {Object.keys(seasonalityCache).length > 0 && !showTop5 && (
+              <span className="text-blue-600">Sorted by Conviction Score (High to Low)</span>
             )}
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {sortedData.map((stock, index) => {
+            {finalDisplayData.map((stock, index) => {
               const symbol = stock['Symbol'];
               const stats = seasonalityCache[symbol];
               const isAnalyzing = analyzingSymbol === symbol;
 
               return (
-                <div key={`${symbol}-${index}`} className={`p-5 border rounded-xl shadow-sm transition-all ${stats && stats.winRate >= 80 ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white hover:shadow-md'}`}>
-                  <h2 className="text-lg font-bold text-gray-800 truncate" title={stock['Company Name']}>
-                    {stock['Company Name']}
-                  </h2>
+                <div key={`${symbol}-${index}`} className={`p-5 border rounded-xl shadow-sm transition-all ${stats && stats.convictionScore >= 80 ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white hover:shadow-md'}`}>
+                  <div className="flex justify-between items-start">
+                    <h2 className="text-lg font-bold text-gray-800 truncate" title={stock['Company Name']}>
+                      {stock['Company Name']}
+                    </h2>
+                    {stats && (
+                      <div className={`px-2 py-1 rounded text-xs font-bold ${stats.convictionScore >= 80 ? 'bg-green-200 text-green-800' : stats.convictionScore >= 60 ? 'bg-yellow-200 text-yellow-800' : 'bg-red-200 text-red-800'}`}>
+                        Score: {stats.convictionScore}
+                      </div>
+                    )}
+                  </div>
+                  
                   <div className="mt-1 text-sm text-gray-500 mb-4">
                     <span className="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700">{symbol}</span>
                     <span className="ml-2">{stock['Industry']}</span>
