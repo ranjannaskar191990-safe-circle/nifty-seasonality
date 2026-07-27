@@ -7,7 +7,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 interface StockData { 'Company Name': string; 'Symbol': string; 'Industry': string; }
 interface YearlyReturn { year: number; return: number; }
 interface SeasonalityResult { winRate: number; averageReturn: number; maxDrawdown: number; totalYearsCounted: number; convictionScore: number; yearlyReturns: YearlyReturn[]; }
-interface RegimeData { current: number; dma200: number; isBullRegime: boolean; }
+
+// UPDATED: Regime Data Interface for Dual-Index
+interface IndexHealth { current: number; dma200: number; isHealthy: boolean; }
+interface RegimeData { nifty50: IndexHealth; nifty200: IndexHealth; isBullRegime: boolean; }
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -41,7 +44,6 @@ export default function Home() {
   const [weeklyData, setWeeklyData] = useState<any[]>([]);
   const [isLoadingWeekly, setIsLoadingWeekly] = useState(false);
 
-  // NEW: Market Regime State
   const [regime, setRegime] = useState<RegimeData | null>(null);
 
   useEffect(() => {
@@ -78,7 +80,7 @@ export default function Home() {
   }
 
   function toggleTrade(symbol: string) {
-    if (regime && !regime.isBullRegime) return; // Hard veto
+    if (regime && !regime.isBullRegime) return; 
     setPortfolio(prev => {
       const monthPortfolio = prev[selectedMonth] || [];
       if (monthPortfolio.includes(symbol)) {
@@ -178,13 +180,11 @@ export default function Home() {
     setScanProgress("");
   }
 
-  // 1. Initial Filter
   const filteredData = dashboardData.filter((stock) => {
     if (!stock['Company Name']) return false;
     return stock['Company Name'].toLowerCase().includes(searchQuery.toLowerCase()) || stock['Symbol'].toLowerCase().includes(searchQuery.toLowerCase());
   });
 
-  // 2. Sort by Score
   const sortedData = [...filteredData].sort((a, b) => {
     const statsA = seasonalityCache[a['Symbol']];
     const statsB = seasonalityCache[b['Symbol']];
@@ -197,23 +197,15 @@ export default function Home() {
     return 0; 
   });
 
-  // 3. ENFORCE INDUSTRY CAP LOGIC (Max 2 per Sector)
   const getCappedTop5 = () => {
     if (!showTop5) return sortedData;
-    
     const industryCounts: Record<string, number> = {};
     const cappedList: StockData[] = [];
-    
     for (const stock of sortedData) {
       if (!seasonalityCache[stock['Symbol']]) continue;
-      
       const ind = stock['Industry'];
       industryCounts[ind] = (industryCounts[ind] || 0) + 1;
-      
-      if (industryCounts[ind] <= 2) {
-        cappedList.push(stock);
-      }
-      
+      if (industryCounts[ind] <= 2) cappedList.push(stock);
       if (cappedList.length === 5) break;
     }
     return cappedList;
@@ -281,19 +273,24 @@ export default function Home() {
       <main className="flex-1 p-6 md:p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
           
-          {/* MARKET REGIME BANNER */}
+          {/* UPDATED: DUAL MARKET REGIME BANNER */}
           {regime && (
-            <div className={`mb-6 p-4 rounded-xl shadow-sm flex items-center justify-between border ${regime.isBullRegime ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-              <div>
+            <div className={`mb-6 p-4 rounded-xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between border ${regime.isBullRegime ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+              <div className="mb-4 md:mb-0">
                 <h2 className={`font-bold text-lg ${regime.isBullRegime ? 'text-green-800' : 'text-red-800'}`}>
-                  Nifty 50 Regime: {regime.isBullRegime ? 'Bull Market (Green Light)' : 'Bear Market (Trading Disabled)'}
+                  Market Regime: {regime.isBullRegime ? 'Bull Market (Green Light)' : 'Bear Market (Trading Disabled)'}
                 </h2>
-                <p className={`text-sm mt-1 ${regime.isBullRegime ? 'text-green-600' : 'text-red-600'}`}>
-                  Index Price: {regime.current} | 200-DMA: {regime.dma200}
-                </p>
+                <div className="flex flex-col sm:flex-row sm:gap-6 mt-1">
+                  <p className={`text-sm ${regime.nifty50.isHealthy ? 'text-green-700' : 'text-red-700'}`}>
+                    <span className="font-semibold">Nifty 50:</span> {regime.nifty50.current} (200-DMA: {regime.nifty50.dma200})
+                  </p>
+                  <p className={`text-sm ${regime.nifty200.isHealthy ? 'text-green-700' : 'text-red-700'}`}>
+                    <span className="font-semibold">Nifty 200:</span> {regime.nifty200.current} (200-DMA: {regime.nifty200.dma200})
+                  </p>
+                </div>
               </div>
-              <div className={`px-4 py-2 rounded-lg font-bold text-sm ${regime.isBullRegime ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-                {regime.isBullRegime ? 'SYSTEM ACTIVE' : 'CASH PRESERVATION MODE'}
+              <div className={`px-4 py-2 rounded-lg font-bold text-sm shadow-sm ${regime.isBullRegime ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+                {regime.isBullRegime ? 'SYSTEM ACTIVE' : 'CASH PRESERVATION'}
               </div>
             </div>
           )}
@@ -316,11 +313,24 @@ export default function Home() {
           <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-6 mb-8">
             <div className="flex-1">
               <label className="block text-sm font-medium text-gray-700 mb-1">Search Stock</label>
-              <input type="text" placeholder="e.g. Reliance, ITC..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none" disabled={showTop5} />
+              {/* FIXED CSS: Added text-gray-900 placeholder:text-gray-400 */}
+              <input 
+                type="text" 
+                placeholder="e.g. Reliance, ITC..." 
+                value={searchQuery} 
+                onChange={(e) => setSearchQuery(e.target.value)} 
+                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none text-gray-900 placeholder:text-gray-400" 
+                disabled={showTop5} 
+              />
             </div>
             <div className="md:w-64">
               <label className="block text-sm font-medium text-gray-700 mb-1">Target Month</label>
-              <select value={selectedMonth} onChange={handleMonthChange} className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white cursor-pointer">
+              {/* FIXED CSS: Added text-gray-900 */}
+              <select 
+                value={selectedMonth} 
+                onChange={handleMonthChange} 
+                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white cursor-pointer text-gray-900"
+              >
                 {MONTHS.map((month, index) => <option key={month} value={index}>{month}</option>)}
               </select>
             </div>
@@ -389,7 +399,6 @@ export default function Home() {
                               <div className="flex justify-between items-center"><span className="text-red-400 font-medium">GTT Stop Loss:</span><span className="font-bold text-red-400">{systemStopLoss.toFixed(2)}%</span></div>
                             </div>
                             
-                            {/* EARNINGS CLEARANCE CHECK */}
                             <label className="flex items-center gap-2 mt-4 text-xs font-medium bg-gray-800 p-2 rounded cursor-pointer hover:bg-gray-700 transition-colors">
                               <input type="checkbox" checked={isEarningsCleared} onChange={() => toggleEarningsCleared(symbol)} className="rounded border-gray-500 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer w-4 h-4" />
                               <span className={isEarningsCleared ? 'text-green-400' : 'text-gray-300'}>Verified: No earnings scheduled in {MONTHS[selectedMonth]}</span>
@@ -429,7 +438,15 @@ export default function Home() {
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Risk Manager</label>
           <div className="flex items-center gap-2">
             <span className="text-gray-600 font-medium">₹</span>
-            <input type="number" value={riskPerTrade} onChange={(e) => setRiskPerTrade(Number(e.target.value))} className="w-full border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500" title="Max Risk per Trade" />
+            {/* FIXED CSS: Added text-gray-900 placeholder:text-gray-400 */}
+            <input 
+              type="number" 
+              value={riskPerTrade || ''} 
+              placeholder="e.g. 1000"
+              onChange={(e) => setRiskPerTrade(Number(e.target.value))} 
+              className="w-full border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500 text-gray-900 placeholder:text-gray-400" 
+              title="Max Risk per Trade" 
+            />
             <span className="text-xs text-gray-400 whitespace-nowrap">Risk/Trade</span>
           </div>
         </div>
