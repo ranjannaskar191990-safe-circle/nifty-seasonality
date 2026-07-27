@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '../../../lib/prisma';
+import { prisma } from '../db';
 
 // GET: Load your saved stocks when you open the dashboard
 export async function GET() {
