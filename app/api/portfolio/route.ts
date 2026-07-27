@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '../db';
 
-// GET: Load your saved stocks when you open the dashboard
 export async function GET() {
   try {
     const savedPortfolio = await prisma.portfolio.findMany({
-      where: { userId: "admin" } // Hardcoded admin profile for you
+      where: { userId: "admin" } 
     });
     return NextResponse.json(savedPortfolio);
   } catch (error) {
@@ -13,7 +12,6 @@ export async function GET() {
   }
 }
 
-// POST: Save or remove a stock when you click the button
 export async function POST(req: Request) {
   try {
     const { symbol, targetMonth, requiredCapital, action } = await req.json();

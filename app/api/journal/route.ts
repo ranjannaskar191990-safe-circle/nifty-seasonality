@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '../../../lib/prisma';
+import { prisma } from '../db';
 
-// GET: Load all your past trade journal entries
 export async function GET() {
   try {
     const journalEntries = await prisma.tradeJournal.findMany({
       where: { userId: "admin" },
-      orderBy: { createdAt: 'desc' } // Shows newest trades first
+      orderBy: { createdAt: 'desc' } 
     });
     return NextResponse.json(journalEntries);
   } catch (error) {
@@ -14,7 +13,6 @@ export async function GET() {
   }
 }
 
-// POST: Add a new trade execution record
 export async function POST(req: Request) {
   try {
     const body = await req.json();
