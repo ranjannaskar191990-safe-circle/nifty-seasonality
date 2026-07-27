@@ -11,11 +11,11 @@ export default function Home() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const url = "https://nsearchives.nseindia.com/content/indices/ind_nifty200list.csv";
-        const response = await fetch(url);
+        // Fetching from our internal Next.js API route to bypass CORS
+        const response = await fetch("/api/nifty");
         
         if (!response.ok) {
-          throw new Error("Failed to fetch Nifty 200 data from source.");
+          throw new Error("Failed to load stock data");
         }
 
         const csvText = await response.text();
@@ -33,7 +33,7 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="p-8 max-w-7xl mx-auto">
+    <main className="p-8 max-w-7xl mx-auto min-h-screen bg-gray-50">
       <h1 className="text-3xl font-bold mb-6 text-gray-900">Nifty 200 Dashboard</h1>
 
       {loading && (
@@ -49,11 +49,11 @@ export default function Home() {
       {!loading && !error && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {dashboardData
-            .filter((stock) => stock['Company Name']) // Filter empty rows
+            .filter((stock) => stock['Company Name'])
             .map((stock, index) => (
               <div 
                 key={index} 
-                className="p-5 border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow bg-white"
+                className="p-5 border border-gray-200 rounded-lg shadow-sm bg-white"
               >
                 <h2 className="text-lg font-semibold text-gray-800">{stock['Company Name']}</h2>
                 <div className="mt-2 text-sm text-gray-600">
