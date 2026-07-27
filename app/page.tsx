@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Papa from 'papaparse';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
+} from 'recharts';
 
 interface StockData {
   'Company Name': string;
@@ -10,18 +13,27 @@ interface StockData {
   'ISIN Code': string;
 }
 
+interface YearlyReturn {
+  year: number;
+  return: number;
+}
+
 interface SeasonalityResult {
   winRate: number;
   averageReturn: number;
   maxDrawdown: number;
   totalYearsCounted: number;
   convictionScore: number;
+  yearlyReturns: YearlyReturn[];
 }
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June", 
   "July", "August", "September", "October", "November", "December"
 ];
+
+// Distinct colors for the top 5 stocks in the chart
+const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 export default function Home() {
   const [dashboardData, setDashboardData] = useState<StockData[]>([]);
@@ -30,7 +42,6 @@ export default function Home() {
   const [seasonalityCache, setSeasonalityCache] = useState<Record<string, SeasonalityResult>>({});
   const [analyzingSymbol, setAnalyzingSymbol] = useState<string | null>(null);
 
-  // Search, Filters, and Scanning States
   const [selectedMonth, setSelectedMonth] = useState<number>(7);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isScanningAll, setIsScanningAll] = useState(false);
@@ -58,7 +69,7 @@ export default function Home() {
   function handleMonthChange(e: React.ChangeEvent<HTMLSelectElement>) {
     setSelectedMonth(Number(e.target.value));
     setSeasonalityCache({}); 
-    setShowTop5(false); // Reset Top 5 view when changing months
+    setShowTop5(false);
   }
 
   async function analyzeStock(symbol: string, silent = false) {
@@ -66,9 +77,7 @@ export default function Home() {
     try {
       const response = await fetch(`/api/history?symbol=${symbol}`);
       
-      if (!response.ok) {
-        throw new Error("Server error");
-      }
+      if (!response.ok) throw new Error("Server error");
       
       const history = await response.json();
       
@@ -76,6 +85,7 @@ export default function Home() {
       let totalReturnOnWins = 0;
       let worstDrop = 0;
       let validYears = 0;
+      const yearlyReturns: YearlyReturn[] = [];
 
       history.forEach((monthData: any) => {
         const date = new Date(monthData.date);
@@ -84,6 +94,12 @@ export default function Home() {
           const open = monthData.open;
           const close = monthData.close;
           const percentChange = ((close - open) / open) * 100;
+          
+          // Track the individual year for the chart
+          yearlyReturns.push({
+            year: date.getFullYear(),
+            return: percentChange
+          });
 
           if (percentChange > 0) {
             wins++;
@@ -96,10 +112,11 @@ export default function Home() {
 
       const winRate = validYears > 0 ? (wins / validYears) * 100 : 0;
       const averageReturn = wins > 0 ? (totalReturnOnWins / wins) : 0;
-      
-      // THE RATING ALGORITHM: 70% weight to Win Rate, 30% weight to Data Completeness (out of 10 years)
       const dataCompletenessScore = (validYears / 10) * 100;
       const convictionScore = Math.round((winRate * 0.7) + (dataCompletenessScore * 0.3));
+
+      // Sort yearly returns chronologically
+      yearlyReturns.sort((a, b) => a.year - b.year);
 
       setSeasonalityCache(prev => ({
         ...prev,
@@ -108,7 +125,8 @@ export default function Home() {
           averageReturn,
           maxDrawdown: worstDrop,
           totalYearsCounted: validYears,
-          convictionScore
+          convictionScore,
+          yearlyReturns
         }
       }));
 
@@ -122,13 +140,13 @@ export default function Home() {
 
   async function runFullScan() {
     setIsScanningAll(true);
-    setShowTop5(false); // Show all while scanning
+    setShowTop5(false);
     const stocksToScan = dashboardData
       .filter((s) => s['Company Name'] && !seasonalityCache[s['Symbol']]);
     
     let completed = 0;
-    
     const BATCH_SIZE = 5;
+    
     for (let i = 0; i < stocksToScan.length; i += BATCH_SIZE) {
       const batch = stocksToScan.slice(i, i + BATCH_SIZE);
       await Promise.all(
@@ -144,7 +162,6 @@ export default function Home() {
     setScanProgress("");
   }
 
-  // 1. Filter the data based on search
   const filteredData = dashboardData.filter((stock) => {
     if (!stock['Company Name']) return false;
     const matchesSearch = 
@@ -153,30 +170,57 @@ export default function Home() {
     return matchesSearch;
   });
 
-  // 2. LIVE SORTING ENGINE: Sort by Conviction Score first
   const sortedData = [...filteredData].sort((a, b) => {
     const statsA = seasonalityCache[a['Symbol']];
     const statsB = seasonalityCache[b['Symbol']];
 
     if (statsA && statsB) {
-      // Primary: Conviction Score (Rating)
       if (statsB.convictionScore !== statsA.convictionScore) {
         return statsB.convictionScore - statsA.convictionScore;
       }
-      // Tie-Breaker: Highest Average Reward
       return statsB.averageReturn - statsA.averageReturn;
     }
     
     if (statsA && !statsB) return -1;
     if (!statsA && statsB) return 1;
-    
     return 0; 
   });
 
-  // 3. TOP 5 TOGGLE LOGIC
   const finalDisplayData = showTop5 
     ? sortedData.filter(stock => seasonalityCache[stock['Symbol']]).slice(0, 5)
     : sortedData;
+
+  // Transform data for the Recharts BarChart
+  const getChartData = () => {
+    if (!showTop5 || finalDisplayData.length === 0) return [];
+
+    const chartDataMap = new Map<number, any>();
+    const currentYear = new Date().getFullYear();
+    
+    // Create a scaffold for the last 10 years
+    for (let y = currentYear - 10; y <= currentYear; y++) {
+      chartDataMap.set(y, { year: y.toString() });
+    }
+
+    // Populate the scaffold with each top stock's return for that year
+    finalDisplayData.forEach((stock) => {
+      const symbol = stock['Symbol'];
+      const stats = seasonalityCache[symbol];
+      if (stats && stats.yearlyReturns) {
+        stats.yearlyReturns.forEach(yr => {
+          if (chartDataMap.has(yr.year)) {
+            const dataPoint = chartDataMap.get(yr.year);
+            dataPoint[symbol] = parseFloat(yr.return.toFixed(2));
+          }
+        });
+      }
+    });
+
+    // Remove any years that have absolutely zero data across all stocks
+    return Array.from(chartDataMap.values()).filter(d => Object.keys(d).length > 1);
+  };
+
+  const chartData = getChartData();
 
   return (
     <main className="p-8 max-w-7xl mx-auto min-h-screen bg-gray-50">
@@ -188,7 +232,6 @@ export default function Home() {
           </div>
           
           <div className="flex gap-3">
-            {/* TOP 5 BUTTON */}
             <button
               onClick={() => setShowTop5(!showTop5)}
               disabled={isScanningAll || Object.keys(seasonalityCache).length === 0}
@@ -197,7 +240,6 @@ export default function Home() {
               {showTop5 ? "Show All Scanned" : "⭐ Top 5 Setups"}
             </button>
 
-            {/* MASS SCAN BUTTON */}
             <button 
               onClick={runFullScan}
               disabled={isScanningAll || loading}
@@ -248,6 +290,44 @@ export default function Home() {
 
       {!loading && !error && (
         <>
+          {/* NEW COMPARATIVE CHART SECTION */}
+          {showTop5 && chartData.length > 0 && (
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <h3 className="text-xl font-bold text-gray-800 mb-6">Historical Comparison ({MONTHS[selectedMonth]})</h3>
+              <div className="h-[400px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                    <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
+                    <YAxis 
+                      tickFormatter={(val) => `${val}%`} 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{fill: '#6b7280', fontSize: 12}}
+                    />
+                    <Tooltip 
+                      formatter={(value: number) => [`${value}%`, undefined]}
+                      cursor={{fill: '#f3f4f6'}}
+                      contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }}/>
+                    
+                    {/* Dynamically create a bar for each of the Top 5 stocks */}
+                    {finalDisplayData.map((stock, idx) => (
+                      <Bar 
+                        key={stock['Symbol']} 
+                        dataKey={stock['Symbol']} 
+                        name={stock['Symbol']} 
+                        fill={CHART_COLORS[idx % CHART_COLORS.length]} 
+                        radius={[4, 4, 0, 0]} 
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
           <div className="mb-4 text-sm text-gray-500 font-medium flex justify-between">
             <span>Showing {finalDisplayData.length} stocks {showTop5 && "(Top 5 Filter Active)"}</span>
             {Object.keys(seasonalityCache).length > 0 && !showTop5 && (
