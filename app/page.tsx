@@ -8,9 +8,25 @@ interface StockData { 'Company Name': string; 'Symbol': string; 'Industry': stri
 interface YearlyReturn { year: number; return: number; }
 interface SeasonalityResult { winRate: number; averageReturn: number; maxDrawdown: number; totalYearsCounted: number; convictionScore: number; yearlyReturns: YearlyReturn[]; }
 
-// UPDATED: Regime Data Interface for Dual-Index
 interface IndexHealth { current: number; dma200: number; isHealthy: boolean; }
 interface RegimeData { nifty50: IndexHealth; nifty200: IndexHealth; isBullRegime: boolean; }
+
+// NEW: Interface for Trade Journal
+interface JournalEntry {
+  id: string;
+  symbol: string;
+  tradeMonth: string;
+  entryDate: string;
+  entryPrice: number;
+  exitDate?: string;
+  exitPrice?: number;
+  allocatedAmount: number;
+  netPnL?: number;
+  noTradeGapMet: boolean;
+  gttStopPlaced: boolean;
+  earningsCleared: boolean;
+  notes?: string;
+}
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -25,6 +41,18 @@ const calculateEMA = (data: any[], period: number) => {
 };
 
 export default function Home() {
+  // NEW: State for Tabs (scanner or journal)
+  const [activeTab, setActiveTab] = useState<'scanner' | 'journal'>('scanner');
+  
+  // NEW: Journal State
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
+  const [isJournalLoading, setIsJournalLoading] = useState(false);
+  const [newEntry, setNewEntry] = useState({
+    symbol: '', tradeMonth: MONTHS[7], entryDate: '', entryPrice: '', 
+    allocatedAmount: '', noTradeGapMet: true, gttStopPlaced: true, 
+    earningsCleared: true, notes: ''
+  });
+
   const [dashboardData, setDashboardData] = useState<StockData[]>([]);
   const [loading, setLoading] = useState(true);
   const [seasonalityCache, setSeasonalityCache] = useState<Record<string, SeasonalityResult>>({});
@@ -49,9 +77,11 @@ export default function Home() {
   useEffect(() => {
     async function initDashboard() {
       try {
-        const [niftyRes, regimeRes] = await Promise.all([
+        const [niftyRes, regimeRes, portfolioRes, journalRes] = await Promise.all([
           fetch("/api/nifty"),
-          fetch("/api/regime")
+          fetch("/api/regime"),
+          fetch("/api/portfolio"),
+          fetch("/api/journal") // Load Journal Data
         ]);
         
         if (niftyRes.ok) {
@@ -64,6 +94,25 @@ export default function Home() {
           const regimeData = await regimeRes.json();
           setRegime(regimeData);
         }
+
+        if (portfolioRes.ok) {
+          const savedItems = await portfolioRes.json();
+          const loadedPortfolio: Record<number, string[]> = {};
+          
+          savedItems.forEach((item: any) => {
+            if (!loadedPortfolio[item.targetMonth]) {
+              loadedPortfolio[item.targetMonth] = [];
+            }
+            loadedPortfolio[item.targetMonth].push(item.symbol);
+          });
+          
+          setPortfolio(loadedPortfolio);
+        }
+
+        if (journalRes.ok) {
+           const jData = await journalRes.json();
+           setJournalEntries(jData);
+        }
       } catch (err: any) {
         console.error("Initialization Error");
       } finally {
@@ -73,29 +122,92 @@ export default function Home() {
     initDashboard();
   }, []);
 
+  // NEW: Function to submit a journal entry
+  async function handleJournalSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setIsJournalLoading(true);
+    try {
+      const res = await fetch('/api/journal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newEntry)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setJournalEntries([data.entry, ...journalEntries]);
+        // Reset form but keep the rules checked
+        setNewEntry({
+          symbol: '', tradeMonth: MONTHS[selectedMonth], entryDate: '', entryPrice: '', 
+          allocatedAmount: '', noTradeGapMet: true, gttStopPlaced: true, 
+          earningsCleared: true, notes: ''
+        });
+        alert('Trade Logged Successfully');
+      }
+    } catch (error) {
+      alert('Error saving to journal');
+    } finally {
+      setIsJournalLoading(false);
+    }
+  }
+
   function handleMonthChange(e: React.ChangeEvent<HTMLSelectElement>) {
     setSelectedMonth(Number(e.target.value));
     setSeasonalityCache({}); 
     setShowTop5(false);
   }
 
-  function toggleTrade(symbol: string) {
+  async function toggleTrade(symbol: string) {
     if (regime && !regime.isBullRegime) return; 
+
+    const monthPortfolio = portfolio[selectedMonth] || [];
+    const isRemoving = monthPortfolio.includes(symbol);
+    const requiredCapital = calculateAllocation(symbol);
+
     setPortfolio(prev => {
-      const monthPortfolio = prev[selectedMonth] || [];
-      if (monthPortfolio.includes(symbol)) {
-        return { ...prev, [selectedMonth]: monthPortfolio.filter(s => s !== symbol) };
+      const current = prev[selectedMonth] || [];
+      if (isRemoving) {
+        return { ...prev, [selectedMonth]: current.filter(s => s !== symbol) };
       } else {
-        return { ...prev, [selectedMonth]: [...monthPortfolio, symbol] };
+        return { ...prev, [selectedMonth]: [...current, symbol] };
       }
     });
+
+    try {
+      await fetch("/api/portfolio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol,
+          targetMonth: selectedMonth,
+          requiredCapital,
+          action: isRemoving ? "remove" : "add"
+        })
+      });
+    } catch (error) {
+      console.error("Failed to sync with database", error);
+    }
   }
 
-  function removeTradeFromPanel(symbol: string, monthIndex: number) {
+  async function removeTradeFromPanel(symbol: string, monthIndex: number) {
     setPortfolio(prev => {
       const monthPortfolio = prev[monthIndex] || [];
       return { ...prev, [monthIndex]: monthPortfolio.filter(s => s !== symbol) };
     });
+
+    try {
+      await fetch("/api/portfolio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol,
+          targetMonth: monthIndex,
+          requiredCapital: 0,
+          action: "remove"
+        })
+      });
+    } catch (error) {
+      console.error("Failed to delete from database", error);
+    }
   }
 
   function toggleEarningsCleared(symbol: string) {
@@ -233,7 +345,7 @@ export default function Home() {
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-gray-50 relative">
       
-      {/* 52-WEEK EMA TACTICAL MODAL */}
+      {/* MODAL REMAINS UNCHANGED */}
       {activeDetailedStock && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/80 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col">
@@ -269,183 +381,312 @@ export default function Home() {
         </div>
       )}
 
-      {/* MAIN DASHBOARD */}
-      <main className="flex-1 p-6 md:p-8 overflow-y-auto">
-        <div className="max-w-7xl mx-auto">
-          
-          {/* UPDATED: DUAL MARKET REGIME BANNER */}
-          {regime && (
-            <div className={`mb-6 p-4 rounded-xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between border ${regime.isBullRegime ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-              <div className="mb-4 md:mb-0">
-                <h2 className={`font-bold text-lg ${regime.isBullRegime ? 'text-green-800' : 'text-red-800'}`}>
-                  Market Regime: {regime.isBullRegime ? 'Bull Market (Green Light)' : 'Bear Market (Trading Disabled)'}
-                </h2>
-                <div className="flex flex-col sm:flex-row sm:gap-6 mt-1">
-                  <p className={`text-sm ${regime.nifty50.isHealthy ? 'text-green-700' : 'text-red-700'}`}>
-                    <span className="font-semibold">Nifty 50:</span> {regime.nifty50.current} (200-DMA: {regime.nifty50.dma200})
-                  </p>
-                  <p className={`text-sm ${regime.nifty200.isHealthy ? 'text-green-700' : 'text-red-700'}`}>
-                    <span className="font-semibold">Nifty 200:</span> {regime.nifty200.current} (200-DMA: {regime.nifty200.dma200})
-                  </p>
-                </div>
-              </div>
-              <div className={`px-4 py-2 rounded-lg font-bold text-sm shadow-sm ${regime.isBullRegime ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-                {regime.isBullRegime ? 'SYSTEM ACTIVE' : 'CASH PRESERVATION'}
-              </div>
-            </div>
-          )}
-
-          <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">10-Year Seasonality System</h1>
-              <p className="text-gray-600 mt-2">Institutional-Grade Execution Engine</p>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setShowTop5(!showTop5)} disabled={isScanningAll || Object.keys(seasonalityCache).length === 0} className={`px-4 py-3 font-bold rounded-lg transition-colors shadow-sm ${showTop5 ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'} disabled:opacity-50`}>
-                {showTop5 ? "Show All Scanned" : "⭐ Capped Top 5 Setups"}
-              </button>
-              <button onClick={runFullScan} disabled={isScanningAll || loading} className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors shadow-sm flex flex-col items-center justify-center min-w-[200px]">
-                {isScanningAll ? <><span className="text-sm">Scanning Market...</span><span className="text-xs font-normal opacity-80">{scanProgress}</span></> : "Run Full Market Scan"}
-              </button>
-            </div>
+      {/* MAIN CONTENT AREA */}
+      <main className="flex-1 overflow-y-auto">
+        
+        {/* TAB NAVIGATION */}
+        <div className="bg-white border-b border-gray-200 sticky top-0 z-20 px-6 md:px-8">
+          <div className="max-w-7xl mx-auto flex gap-6">
+            <button 
+              onClick={() => setActiveTab('scanner')} 
+              className={`py-4 font-bold text-sm border-b-2 transition-colors ${activeTab === 'scanner' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              System Scanner
+            </button>
+            <button 
+              onClick={() => setActiveTab('journal')} 
+              className={`py-4 font-bold text-sm border-b-2 transition-colors ${activeTab === 'journal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              Trade Journal (Execution)
+            </button>
           </div>
-          
-          <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-6 mb-8">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Search Stock</label>
-              {/* FIXED CSS: Added text-gray-900 placeholder:text-gray-400 */}
-              <input 
-                type="text" 
-                placeholder="e.g. Reliance, ITC..." 
-                value={searchQuery} 
-                onChange={(e) => setSearchQuery(e.target.value)} 
-                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none text-gray-900 placeholder:text-gray-400" 
-                disabled={showTop5} 
-              />
-            </div>
-            <div className="md:w-64">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Target Month</label>
-              {/* FIXED CSS: Added text-gray-900 */}
-              <select 
-                value={selectedMonth} 
-                onChange={handleMonthChange} 
-                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white cursor-pointer text-gray-900"
-              >
-                {MONTHS.map((month, index) => <option key={month} value={index}>{month}</option>)}
-              </select>
-            </div>
-          </div>
+        </div>
 
-          {!loading && (
-            <>
-              {showTop5 && chartData.length > 0 && (
-                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8 animate-in fade-in duration-500">
-                  <h3 className="text-xl font-bold text-gray-800 mb-6">Historical Comparison ({MONTHS[selectedMonth]}) - Sector Capped</h3>
-                  <div className="h-[400px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                        <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
-                        <YAxis tickFormatter={(val) => `${val}%`} axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
-                        <Tooltip formatter={(value: number) => [`${value}%`, undefined]} cursor={{fill: '#f3f4f6'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                        <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }}/>
-                        {finalDisplayData.map((stock, idx) => (
-                          <Bar key={stock['Symbol']} dataKey={stock['Symbol']} name={stock['Symbol']} fill={CHART_COLORS[idx % CHART_COLORS.length]} radius={[4, 4, 0, 0]} />
-                        ))}
-                      </BarChart>
-                    </ResponsiveContainer>
+        <div className="p-6 md:p-8">
+          <div className="max-w-7xl mx-auto">
+            
+            {/* ---------------- SCANNER TAB ---------------- */}
+            {activeTab === 'scanner' && (
+              <>
+                {regime && (
+                  <div className={`mb-6 p-4 rounded-xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between border ${regime.isBullRegime ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className="mb-4 md:mb-0">
+                      <h2 className={`font-bold text-lg ${regime.isBullRegime ? 'text-green-800' : 'text-red-800'}`}>
+                        Market Regime: {regime.isBullRegime ? 'Bull Market (Green Light)' : 'Bear Market (Trading Disabled)'}
+                      </h2>
+                      <div className="flex flex-col sm:flex-row sm:gap-6 mt-1">
+                        <p className={`text-sm ${regime.nifty50.isHealthy ? 'text-green-700' : 'text-red-700'}`}>
+                          <span className="font-semibold">Nifty 50:</span> {regime.nifty50.current} (200-DMA: {regime.nifty50.dma200})
+                        </p>
+                        <p className={`text-sm ${regime.nifty200.isHealthy ? 'text-green-700' : 'text-red-700'}`}>
+                          <span className="font-semibold">Nifty 200:</span> {regime.nifty200.current} (200-DMA: {regime.nifty200.dma200})
+                        </p>
+                      </div>
+                    </div>
+                    <div className={`px-4 py-2 rounded-lg font-bold text-sm shadow-sm ${regime.isBullRegime ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+                      {regime.isBullRegime ? 'SYSTEM ACTIVE' : 'CASH PRESERVATION'}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div>
+                    <h1 className="text-3xl font-bold text-gray-900">10-Year Seasonality System</h1>
+                    <p className="text-gray-600 mt-2">Institutional-Grade Execution Engine</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={() => setShowTop5(!showTop5)} disabled={isScanningAll || Object.keys(seasonalityCache).length === 0} className={`px-4 py-3 font-bold rounded-lg transition-colors shadow-sm ${showTop5 ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'} disabled:opacity-50`}>
+                      {showTop5 ? "Show All Scanned" : "⭐ Capped Top 5 Setups"}
+                    </button>
+                    <button onClick={runFullScan} disabled={isScanningAll || loading} className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors shadow-sm flex flex-col items-center justify-center min-w-[200px]">
+                      {isScanningAll ? <><span className="text-sm">Scanning Market...</span><span className="text-xs font-normal opacity-80">{scanProgress}</span></> : "Run Full Market Scan"}
+                    </button>
                   </div>
                 </div>
-              )}
+                
+                <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-6 mb-8">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Search Stock</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Reliance, ITC..." 
+                      value={searchQuery} 
+                      onChange={(e) => setSearchQuery(e.target.value)} 
+                      className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none text-gray-900 placeholder:text-gray-400" 
+                      disabled={showTop5} 
+                    />
+                  </div>
+                  <div className="md:w-64">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Target Month</label>
+                    <select 
+                      value={selectedMonth} 
+                      onChange={handleMonthChange} 
+                      className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white cursor-pointer text-gray-900"
+                    >
+                      {MONTHS.map((month, index) => <option key={month} value={index}>{month}</option>)}
+                    </select>
+                  </div>
+                </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
-                {finalDisplayData.map((stock, index) => {
-                  const symbol = stock['Symbol'];
-                  const stats = seasonalityCache[symbol];
-                  const isAnalyzing = analyzingSymbol === symbol;
-                  const systemStopLoss = stats ? Math.min(stats.maxDrawdown - 1, -2) : 0; 
-                  const isSelectedForTrade = (portfolio[selectedMonth] || []).includes(symbol);
-                  const isEarningsCleared = !!earningsCleared[symbol];
-
-                  return (
-                    <div key={`${symbol}-${index}`} className={`p-5 border rounded-xl shadow-sm transition-all flex flex-col ${stats && stats.convictionScore >= 80 ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white hover:shadow-md'}`}>
-                      <div className="flex justify-between items-start">
-                        <h2 className="text-lg font-bold text-gray-800 truncate" title={stock['Company Name']}>{stock['Company Name']}</h2>
-                        {stats && <div className={`px-2 py-1 rounded text-xs font-bold ${stats.convictionScore >= 80 ? 'bg-green-200 text-green-800' : stats.convictionScore >= 60 ? 'bg-yellow-200 text-yellow-800' : 'bg-red-200 text-red-800'}`}>Score: {stats.convictionScore}</div>}
-                      </div>
-                      
-                      <div className="mt-1 text-sm text-gray-500 mb-4 flex justify-between items-center">
-                        <div>
-                          <span className="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700">{symbol}</span>
-                          <span className="ml-2 font-medium text-blue-600">{stock['Industry']}</span>
+                {!loading && (
+                  <>
+                    {showTop5 && chartData.length > 0 && (
+                      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8 animate-in fade-in duration-500">
+                        <h3 className="text-xl font-bold text-gray-800 mb-6">Historical Comparison ({MONTHS[selectedMonth]}) - Sector Capped</h3>
+                        <div className="h-[400px] w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                              <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
+                              <YAxis tickFormatter={(val) => `${val}%`} axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
+                              <Tooltip formatter={(value: number) => [`${value}%`, undefined]} cursor={{fill: '#f3f4f6'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                              <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }}/>
+                              {finalDisplayData.map((stock, idx) => (
+                                <Bar key={stock['Symbol']} dataKey={stock['Symbol']} name={stock['Symbol']} fill={CHART_COLORS[idx % CHART_COLORS.length]} radius={[4, 4, 0, 0]} />
+                              ))}
+                            </BarChart>
+                          </ResponsiveContainer>
                         </div>
                       </div>
+                    )}
 
-                      {stats ? (
-                        <div className="flex-1 flex flex-col gap-4">
-                          <div className="bg-white p-3 rounded-lg border border-gray-100 space-y-2 shadow-sm">
-                            <div className="flex justify-between items-center"><span className="text-sm font-medium text-gray-600">Win Rate:</span><span className={`font-bold text-lg ${stats.winRate >= 80 ? 'text-green-600' : 'text-gray-800'}`}>{stats.winRate.toFixed(1)}%</span></div>
-                            <div className="flex justify-between items-center"><span className="text-sm font-medium text-gray-600">Avg Reward:</span><span className="font-bold text-green-600">+{stats.averageReturn.toFixed(2)}%</span></div>
-                            <div className="flex justify-between items-center"><span className="text-sm font-medium text-gray-600">Worst Drop:</span><span className="font-bold text-red-600">{stats.maxDrawdown.toFixed(2)}%</span></div>
-                          </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
+                      {finalDisplayData.map((stock, index) => {
+                        const symbol = stock['Symbol'];
+                        const stats = seasonalityCache[symbol];
+                        const isAnalyzing = analyzingSymbol === symbol;
+                        const systemStopLoss = stats ? Math.min(stats.maxDrawdown - 1, -2) : 0; 
+                        const isSelectedForTrade = (portfolio[selectedMonth] || []).includes(symbol);
+                        const isEarningsCleared = !!earningsCleared[symbol];
 
-                          <div className="bg-gray-900 p-4 rounded-lg shadow-sm mt-auto text-gray-100">
-                            <div className="text-xs uppercase font-bold text-gray-400 mb-3 tracking-wider border-b border-gray-700 pb-2">Execution Plan</div>
-                            <div className="space-y-3 text-sm">
-                              <div className="flex justify-between items-center"><span className="text-gray-400">Entry (Market Open):</span><span className="font-semibold text-white">1st of {MONTHS[selectedMonth]}</span></div>
-                              <div className="flex justify-between items-center"><span className="text-gray-400">Exit (Market Close):</span><span className="font-semibold text-white">End of {MONTHS[selectedMonth]}</span></div>
-                              <div className="flex justify-between items-center pt-2 border-t border-gray-700"><span className="text-yellow-500 font-medium">No-Trade Gap:</span><span className="font-bold text-yellow-500">Max +1.5%</span></div>
-                              <div className="flex justify-between items-center"><span className="text-green-400 font-medium">Profit Target:</span><span className="font-bold text-green-400">+{stats.averageReturn.toFixed(2)}%</span></div>
-                              <div className="flex justify-between items-center"><span className="text-red-400 font-medium">GTT Stop Loss:</span><span className="font-bold text-red-400">{systemStopLoss.toFixed(2)}%</span></div>
+                        return (
+                          <div key={`${symbol}-${index}`} className={`p-5 border rounded-xl shadow-sm transition-all flex flex-col ${stats && stats.convictionScore >= 80 ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white hover:shadow-md'}`}>
+                            <div className="flex justify-between items-start">
+                              <h2 className="text-lg font-bold text-gray-800 truncate" title={stock['Company Name']}>{stock['Company Name']}</h2>
+                              {stats && <div className={`px-2 py-1 rounded text-xs font-bold ${stats.convictionScore >= 80 ? 'bg-green-200 text-green-800' : stats.convictionScore >= 60 ? 'bg-yellow-200 text-yellow-800' : 'bg-red-200 text-red-800'}`}>Score: {stats.convictionScore}</div>}
                             </div>
                             
-                            <label className="flex items-center gap-2 mt-4 text-xs font-medium bg-gray-800 p-2 rounded cursor-pointer hover:bg-gray-700 transition-colors">
-                              <input type="checkbox" checked={isEarningsCleared} onChange={() => toggleEarningsCleared(symbol)} className="rounded border-gray-500 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer w-4 h-4" />
-                              <span className={isEarningsCleared ? 'text-green-400' : 'text-gray-300'}>Verified: No earnings scheduled in {MONTHS[selectedMonth]}</span>
-                            </label>
+                            <div className="mt-1 text-sm text-gray-500 mb-4 flex justify-between items-center">
+                              <div>
+                                <span className="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700">{symbol}</span>
+                                <span className="ml-2 font-medium text-blue-600">{stock['Industry']}</span>
+                              </div>
+                            </div>
 
-                            <button 
-                              onClick={() => toggleTrade(symbol)} 
-                              disabled={!isMarketHealthy || !isEarningsCleared}
-                              className={`w-full py-2.5 mt-3 rounded-md font-bold transition-all border ${isSelectedForTrade ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-700' : 'bg-transparent border-gray-500 text-gray-300 hover:bg-gray-800 hover:text-white'} disabled:opacity-40 disabled:cursor-not-allowed`}
-                            >
-                              {!isMarketHealthy ? "Market Veto Active" : !isEarningsCleared ? "Clear Earnings First" : isSelectedForTrade ? `✓ Added to ${MONTHS[selectedMonth]}` : `+ Select to Trade`}
-                            </button>
+                            {stats ? (
+                              <div className="flex-1 flex flex-col gap-4">
+                                <div className="bg-white p-3 rounded-lg border border-gray-100 space-y-2 shadow-sm">
+                                  <div className="flex justify-between items-center"><span className="text-sm font-medium text-gray-600">Win Rate:</span><span className={`font-bold text-lg ${stats.winRate >= 80 ? 'text-green-600' : 'text-gray-800'}`}>{stats.winRate.toFixed(1)}%</span></div>
+                                  <div className="flex justify-between items-center"><span className="text-sm font-medium text-gray-600">Avg Reward:</span><span className="font-bold text-green-600">+{stats.averageReturn.toFixed(2)}%</span></div>
+                                  <div className="flex justify-between items-center"><span className="text-sm font-medium text-gray-600">Worst Drop:</span><span className="font-bold text-red-600">{stats.maxDrawdown.toFixed(2)}%</span></div>
+                                </div>
+
+                                <div className="bg-gray-900 p-4 rounded-lg shadow-sm mt-auto text-gray-100">
+                                  <div className="text-xs uppercase font-bold text-gray-400 mb-3 tracking-wider border-b border-gray-700 pb-2">Execution Plan</div>
+                                  <div className="space-y-3 text-sm">
+                                    <div className="flex justify-between items-center"><span className="text-gray-400">Entry (Market Open):</span><span className="font-semibold text-white">1st of {MONTHS[selectedMonth]}</span></div>
+                                    <div className="flex justify-between items-center"><span className="text-gray-400">Exit (Market Close):</span><span className="font-semibold text-white">End of {MONTHS[selectedMonth]}</span></div>
+                                    <div className="flex justify-between items-center pt-2 border-t border-gray-700"><span className="text-yellow-500 font-medium">No-Trade Gap:</span><span className="font-bold text-yellow-500">Max +1.5%</span></div>
+                                    <div className="flex justify-between items-center"><span className="text-green-400 font-medium">Profit Target:</span><span className="font-bold text-green-400">+{stats.averageReturn.toFixed(2)}%</span></div>
+                                    <div className="flex justify-between items-center"><span className="text-red-400 font-medium">GTT Stop Loss:</span><span className="font-bold text-red-400">{systemStopLoss.toFixed(2)}%</span></div>
+                                  </div>
+                                  
+                                  <label className="flex items-center gap-2 mt-4 text-xs font-medium bg-gray-800 p-2 rounded cursor-pointer hover:bg-gray-700 transition-colors">
+                                    <input type="checkbox" checked={isEarningsCleared} onChange={() => toggleEarningsCleared(symbol)} className="rounded border-gray-500 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer w-4 h-4" />
+                                    <span className={isEarningsCleared ? 'text-green-400' : 'text-gray-300'}>Verified: No earnings scheduled in {MONTHS[selectedMonth]}</span>
+                                  </label>
+
+                                  <button 
+                                    onClick={() => toggleTrade(symbol)} 
+                                    disabled={!isMarketHealthy || !isEarningsCleared}
+                                    className={`w-full py-2.5 mt-3 rounded-md font-bold transition-all border ${isSelectedForTrade ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-700' : 'bg-transparent border-gray-500 text-gray-300 hover:bg-gray-800 hover:text-white'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                                  >
+                                    {!isMarketHealthy ? "Market Veto Active" : !isEarningsCleared ? "Clear Earnings First" : isSelectedForTrade ? `✓ Added to ${MONTHS[selectedMonth]}` : `+ Select to Trade`}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button onClick={() => analyzeStock(symbol)} disabled={isAnalyzing || isScanningAll} className="w-full py-2 px-4 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 disabled:bg-gray-300 transition-colors mt-auto">
+                                {isAnalyzing ? "Analyzing..." : `Analyze for ${MONTHS[selectedMonth]}`}
+                              </button>
+                            )}
                           </div>
-                        </div>
-                      ) : (
-                        <button onClick={() => analyzeStock(symbol)} disabled={isAnalyzing || isScanningAll} className="w-full py-2 px-4 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 disabled:bg-gray-300 transition-colors mt-auto">
-                          {isAnalyzing ? "Analyzing..." : `Analyze for ${MONTHS[selectedMonth]}`}
-                        </button>
-                      )}
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </>
+                )}
+              </>
+            )}
+
+            {/* ---------------- JOURNAL TAB ---------------- */}
+            {activeTab === 'journal' && (
+              <div className="space-y-8">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900">Execution Journal</h1>
+                  <p className="text-gray-600 mt-2">Log your trades to ensure system adherence.</p>
+                </div>
+
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <h2 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Log New Execution</h2>
+                  <form onSubmit={handleJournalSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Symbol (Ticker)</label>
+                      <input required type="text" value={newEntry.symbol} onChange={e => setNewEntry({...newEntry, symbol: e.target.value.toUpperCase()})} className="w-full border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. RELIANCE" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Trade Month</label>
+                      <select value={newEntry.tradeMonth} onChange={e => setNewEntry({...newEntry, tradeMonth: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2 text-gray-900">
+                        {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Capital Allocated (₹)</label>
+                      <input required type="number" value={newEntry.allocatedAmount} onChange={e => setNewEntry({...newEntry, allocatedAmount: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. 50000" />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Entry Date</label>
+                      <input required type="date" value={newEntry.entryDate} onChange={e => setNewEntry({...newEntry, entryDate: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2 text-gray-900" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Entry Price</label>
+                      <input required type="number" step="0.01" value={newEntry.entryPrice} onChange={e => setNewEntry({...newEntry, entryPrice: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2 text-gray-900" />
+                    </div>
+
+                    <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
+                      <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                        <input type="checkbox" checked={newEntry.noTradeGapMet} onChange={e => setNewEntry({...newEntry, noTradeGapMet: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                        <span className="text-gray-800">Gap Rule Kept (&lt; 1.5%)</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                        <input type="checkbox" checked={newEntry.gttStopPlaced} onChange={e => setNewEntry({...newEntry, gttStopPlaced: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                        <span className="text-gray-800">GTT Stop Placed in Broker</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                        <input type="checkbox" checked={newEntry.earningsCleared} onChange={e => setNewEntry({...newEntry, earningsCleared: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                        <span className="text-gray-800">No Earnings Confirmed</span>
+                      </label>
+                    </div>
+
+                    <div className="lg:col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Post-Mortem Notes (Optional)</label>
+                      <textarea value={newEntry.notes} onChange={e => setNewEntry({...newEntry, notes: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2 text-gray-900" rows={2} placeholder="Any deviations from plan? Mental state?"></textarea>
+                    </div>
+
+                    <div className="lg:col-span-3">
+                      <button type="submit" disabled={isJournalLoading} className="px-6 py-3 bg-gray-900 text-white font-bold rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50">
+                        {isJournalLoading ? 'Logging...' : 'Save Execution Record'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                  <div className="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                    <h2 className="text-lg font-bold text-gray-800">Historical Executions</h2>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b">
+                        <tr>
+                          <th className="px-6 py-3">Symbol</th>
+                          <th className="px-6 py-3">Month</th>
+                          <th className="px-6 py-3">Entry Date</th>
+                          <th className="px-6 py-3">Capital</th>
+                          <th className="px-6 py-3">System Adherence</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {journalEntries.length === 0 ? (
+                          <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No trades logged yet.</td></tr>
+                        ) : (
+                          journalEntries.map((entry) => (
+                            <tr key={entry.id} className="bg-white border-b hover:bg-gray-50">
+                              <td className="px-6 py-4 font-bold text-gray-900">{entry.symbol}</td>
+                              <td className="px-6 py-4">{entry.tradeMonth}</td>
+                              <td className="px-6 py-4">{new Date(entry.entryDate).toLocaleDateString()}</td>
+                              <td className="px-6 py-4 font-medium">₹{entry.allocatedAmount.toLocaleString()}</td>
+                              <td className="px-6 py-4">
+                                <div className="flex gap-1 text-xs">
+                                  <span className={`px-2 py-1 rounded ${entry.noTradeGapMet ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`} title="Gap Rule">GAP</span>
+                                  <span className={`px-2 py-1 rounded ${entry.gttStopPlaced ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`} title="GTT Stop Placed">GTT</span>
+                                  <span className={`px-2 py-1 rounded ${entry.earningsCleared ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`} title="Earnings Cleared">ERN</span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
               </div>
-            </>
-          )}
+            )}
+
+          </div>
         </div>
       </main>
 
-      {/* PORTFOLIO & RISK SIDEBAR */}
+      {/* PORTFOLIO & RISK SIDEBAR - ALWAYS VISIBLE */}
       <aside className="w-full lg:w-80 xl:w-96 bg-white border-l border-gray-200 shadow-lg lg:h-screen lg:sticky lg:top-0 overflow-y-auto flex flex-col">
         <div className="p-6 border-b border-gray-200 bg-gray-50 sticky top-0 z-10">
           <h2 className="text-xl font-bold text-gray-900">Trading Calendar</h2>
-          <p className="text-sm text-gray-500 mt-1">Click a ticker to view EMA Trend</p>
+          <p className="text-sm text-gray-500 mt-1">Your saved setups</p>
         </div>
 
         <div className="p-4 border-b border-gray-200 bg-white">
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Risk Manager</label>
           <div className="flex items-center gap-2">
             <span className="text-gray-600 font-medium">₹</span>
-            {/* FIXED CSS: Added text-gray-900 placeholder:text-gray-400 */}
             <input 
               type="number" 
               value={riskPerTrade || ''} 
               placeholder="e.g. 1000"
               onChange={(e) => setRiskPerTrade(Number(e.target.value))} 
               className="w-full border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500 text-gray-900 placeholder:text-gray-400" 
-              title="Max Risk per Trade" 
             />
             <span className="text-xs text-gray-400 whitespace-nowrap">Risk/Trade</span>
           </div>

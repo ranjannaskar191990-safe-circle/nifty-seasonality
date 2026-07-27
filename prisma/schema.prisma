@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Portfolio {
+  id              String   @id @default(cuid())
+  userId          String   @default("admin")
+  symbol          String
+  targetMonth     Int      
+  requiredCapital Float
+  addedAt         DateTime @default(now())
+
+  @@unique([userId, symbol, targetMonth]) 
+}
+
+model TradeJournal {
+  id              String   @id @default(cuid())
+  userId          String   @default("admin")
+  symbol          String
+  tradeMonth      String   
+  
+  noTradeGapMet   Boolean  @default(true) 
+  gttStopPlaced   Boolean  @default(true) 
+  earningsCleared Boolean  @default(true) 
+  
+  entryDate       DateTime
+  entryPrice      Float
+  exitDate        DateTime?
+  exitPrice       Float?
+  allocatedAmount Float
+  
+  netPnL          Float?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
