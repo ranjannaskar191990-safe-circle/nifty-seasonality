@@ -12,12 +12,14 @@
   "dependencies": {
     "@prisma/client": "^5.10.0",
     "next": "15.5.22",
+    "papaparse": "^5.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.15.4"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "prisma": "^5.10.0",
