@@ -29,9 +29,11 @@ export default function Home() {
   const [seasonalityCache, setSeasonalityCache] = useState<Record<string, SeasonalityResult>>({});
   const [analyzingSymbol, setAnalyzingSymbol] = useState<string | null>(null);
 
-  // New State for Search and Month Filter
-  const [selectedMonth, setSelectedMonth] = useState<number>(7); // Defaults to August (index 7)
+  // Search, Month Filter, and Scanning States
+  const [selectedMonth, setSelectedMonth] = useState<number>(7);
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [isScanningAll, setIsScanningAll] = useState(false);
+  const [scanProgress, setScanProgress] = useState("");
 
   useEffect(() => {
     async function fetchNiftyList() {
@@ -51,20 +53,19 @@ export default function Home() {
     fetchNiftyList();
   }, []);
 
-  // Clear the cache whenever the user changes the target month
   function handleMonthChange(e: React.ChangeEvent<HTMLSelectElement>) {
     setSelectedMonth(Number(e.target.value));
     setSeasonalityCache({}); 
   }
 
-  async function analyzeStock(symbol: string) {
-    setAnalyzingSymbol(symbol);
+  // Modified to accept a 'silent' flag so it doesn't pop up alerts during a mass scan
+  async function analyzeStock(symbol: string, silent = false) {
+    if (!silent) setAnalyzingSymbol(symbol);
     try {
       const response = await fetch(`/api/history?symbol=${symbol}`);
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Unknown server error");
+        throw new Error("Server error");
       }
       
       const history = await response.json();
@@ -106,13 +107,39 @@ export default function Home() {
 
     } catch (error: any) {
       console.error(`Error analyzing ${symbol}:`, error);
-      alert(`SYSTEM ERROR FOR ${symbol}:\n\n${error.message}`);
+      if (!silent) alert(`SYSTEM ERROR FOR ${symbol}:\n\n${error.message}`);
     } finally {
-      setAnalyzingSymbol(null);
+      if (!silent) setAnalyzingSymbol(null);
     }
   }
 
-  // Filter the data based on the search query
+  // The Mass Scanner Engine
+  async function runFullScan() {
+    setIsScanningAll(true);
+    // Only scan stocks that haven't been analyzed yet
+    const stocksToScan = dashboardData
+      .filter((s) => s['Company Name'] && !seasonalityCache[s['Symbol']]);
+    
+    let completed = 0;
+    
+    // Process in small batches of 5 to avoid overwhelming the browser network
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < stocksToScan.length; i += BATCH_SIZE) {
+      const batch = stocksToScan.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (stock) => {
+          await analyzeStock(stock['Symbol'], true);
+          completed++;
+          setScanProgress(`${completed} / ${stocksToScan.length}`);
+        })
+      );
+    }
+    
+    setIsScanningAll(false);
+    setScanProgress("");
+  }
+
+  // 1. Filter the data based on search
   const filteredData = dashboardData.filter((stock) => {
     if (!stock['Company Name']) return false;
     const matchesSearch = 
@@ -121,19 +148,59 @@ export default function Home() {
     return matchesSearch;
   });
 
+  // 2. LIVE SORTING ENGINE: Best setups bubble to the top automatically
+  const sortedData = [...filteredData].sort((a, b) => {
+    const statsA = seasonalityCache[a['Symbol']];
+    const statsB = seasonalityCache[b['Symbol']];
+
+    if (statsA && statsB) {
+      // Rule 1: Highest Win Rate first
+      if (statsB.winRate !== statsA.winRate) {
+        return statsB.winRate - statsA.winRate;
+      }
+      // Rule 2: If Win Rate is a tie, Highest Average Reward first
+      return statsB.averageReturn - statsA.averageReturn;
+    }
+    
+    // Analyzed stocks always float above un-analyzed stocks
+    if (statsA && !statsB) return -1;
+    if (!statsA && statsB) return 1;
+    
+    return 0; // Keep original order for un-analyzed
+  });
+
   return (
     <main className="p-8 max-w-7xl mx-auto min-h-screen bg-gray-50">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">10-Year Seasonality System</h1>
-        <p className="text-gray-600 mt-2 mb-6">Emotionless Execution Engine</p>
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">10-Year Seasonality System</h1>
+            <p className="text-gray-600 mt-2 mb-6">Emotionless Execution Engine</p>
+          </div>
+          
+          {/* MASS SCAN BUTTON */}
+          <button 
+            onClick={runFullScan}
+            disabled={isScanningAll || loading}
+            className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors shadow-sm flex flex-col items-center justify-center"
+          >
+            {isScanningAll ? (
+              <>
+                <span>Scanning Market...</span>
+                <span className="text-xs font-normal opacity-80">{scanProgress}</span>
+              </>
+            ) : (
+              "Run Full Market Scan"
+            )}
+          </button>
+        </div>
         
-        {/* NEW CONTROLS SECTION */}
         <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
           <div className="flex-1">
             <label className="block text-sm font-medium text-gray-700 mb-1">Search Stock</label>
             <input 
               type="text" 
-              placeholder="e.g. Reliance, ITC, BPCL..." 
+              placeholder="e.g. Reliance, ITC..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
@@ -160,17 +227,21 @@ export default function Home() {
 
       {!loading && !error && (
         <>
-          <div className="mb-4 text-sm text-gray-500 font-medium">
-            Showing {filteredData.length} stocks
+          <div className="mb-4 text-sm text-gray-500 font-medium flex justify-between">
+            <span>Showing {sortedData.length} stocks</span>
+            {Object.keys(seasonalityCache).length > 0 && (
+              <span className="text-blue-600">Sorted by Win Rate (High to Low)</span>
+            )}
           </div>
+          
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredData.map((stock, index) => {
+            {sortedData.map((stock, index) => {
               const symbol = stock['Symbol'];
               const stats = seasonalityCache[symbol];
               const isAnalyzing = analyzingSymbol === symbol;
 
               return (
-                <div key={index} className="p-5 border border-gray-200 rounded-xl shadow-sm bg-white hover:shadow-md transition-all">
+                <div key={`${symbol}-${index}`} className={`p-5 border rounded-xl shadow-sm transition-all ${stats && stats.winRate >= 80 ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white hover:shadow-md'}`}>
                   <h2 className="text-lg font-bold text-gray-800 truncate" title={stock['Company Name']}>
                     {stock['Company Name']}
                   </h2>
@@ -180,10 +251,10 @@ export default function Home() {
                   </div>
 
                   {stats ? (
-                    <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 space-y-2">
+                    <div className="bg-white p-3 rounded-lg border border-gray-100 space-y-2 shadow-sm">
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-medium text-gray-600">Win Rate:</span>
-                        <span className={`font-bold ${stats.winRate >= 80 ? 'text-green-600' : 'text-gray-800'}`}>
+                        <span className={`font-bold text-lg ${stats.winRate >= 80 ? 'text-green-600' : 'text-gray-800'}`}>
                           {stats.winRate.toFixed(1)}%
                         </span>
                       </div>
@@ -202,7 +273,7 @@ export default function Home() {
                   ) : (
                     <button 
                       onClick={() => analyzeStock(symbol)}
-                      disabled={isAnalyzing}
+                      disabled={isAnalyzing || isScanningAll}
                       className="w-full py-2 px-4 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 disabled:bg-gray-300 transition-colors"
                     >
                       {isAnalyzing ? "Analyzing..." : `Analyze for ${MONTHS[selectedMonth]}`}
