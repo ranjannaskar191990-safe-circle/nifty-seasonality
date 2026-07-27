@@ -32,7 +32,6 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December"
 ];
 
-// Distinct colors for the top 5 stocks in the chart
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 export default function Home() {
@@ -95,7 +94,6 @@ export default function Home() {
           const close = monthData.close;
           const percentChange = ((close - open) / open) * 100;
           
-          // Track the individual year for the chart
           yearlyReturns.push({
             year: date.getFullYear(),
             return: percentChange
@@ -115,7 +113,6 @@ export default function Home() {
       const dataCompletenessScore = (validYears / 10) * 100;
       const convictionScore = Math.round((winRate * 0.7) + (dataCompletenessScore * 0.3));
 
-      // Sort yearly returns chronologically
       yearlyReturns.sort((a, b) => a.year - b.year);
 
       setSeasonalityCache(prev => ({
@@ -190,19 +187,15 @@ export default function Home() {
     ? sortedData.filter(stock => seasonalityCache[stock['Symbol']]).slice(0, 5)
     : sortedData;
 
-  // Transform data for the Recharts BarChart
   const getChartData = () => {
     if (!showTop5 || finalDisplayData.length === 0) return [];
-
     const chartDataMap = new Map<number, any>();
     const currentYear = new Date().getFullYear();
     
-    // Create a scaffold for the last 10 years
     for (let y = currentYear - 10; y <= currentYear; y++) {
       chartDataMap.set(y, { year: y.toString() });
     }
 
-    // Populate the scaffold with each top stock's return for that year
     finalDisplayData.forEach((stock) => {
       const symbol = stock['Symbol'];
       const stats = seasonalityCache[symbol];
@@ -216,7 +209,6 @@ export default function Home() {
       }
     });
 
-    // Remove any years that have absolutely zero data across all stocks
     return Array.from(chartDataMap.values()).filter(d => Object.keys(d).length > 1);
   };
 
@@ -290,7 +282,6 @@ export default function Home() {
 
       {!loading && !error && (
         <>
-          {/* NEW COMPARATIVE CHART SECTION */}
           {showTop5 && chartData.length > 0 && (
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <h3 className="text-xl font-bold text-gray-800 mb-6">Historical Comparison ({MONTHS[selectedMonth]})</h3>
@@ -312,7 +303,6 @@ export default function Home() {
                     />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }}/>
                     
-                    {/* Dynamically create a bar for each of the Top 5 stocks */}
                     {finalDisplayData.map((stock, idx) => (
                       <Bar 
                         key={stock['Symbol']} 
@@ -327,22 +317,18 @@ export default function Home() {
               </div>
             </div>
           )}
-
-          <div className="mb-4 text-sm text-gray-500 font-medium flex justify-between">
-            <span>Showing {finalDisplayData.length} stocks {showTop5 && "(Top 5 Filter Active)"}</span>
-            {Object.keys(seasonalityCache).length > 0 && !showTop5 && (
-              <span className="text-blue-600">Sorted by Conviction Score (High to Low)</span>
-            )}
-          </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {finalDisplayData.map((stock, index) => {
               const symbol = stock['Symbol'];
               const stats = seasonalityCache[symbol];
               const isAnalyzing = analyzingSymbol === symbol;
 
+              // Calculate the System Stop Loss (Max Drawdown + 1% Buffer)
+              const systemStopLoss = stats ? Math.min(stats.maxDrawdown - 1, -2) : 0; // Ensures at least a 2% minimum stop
+
               return (
-                <div key={`${symbol}-${index}`} className={`p-5 border rounded-xl shadow-sm transition-all ${stats && stats.convictionScore >= 80 ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white hover:shadow-md'}`}>
+                <div key={`${symbol}-${index}`} className={`p-5 border rounded-xl shadow-sm transition-all flex flex-col ${stats && stats.convictionScore >= 80 ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white hover:shadow-md'}`}>
                   <div className="flex justify-between items-start">
                     <h2 className="text-lg font-bold text-gray-800 truncate" title={stock['Company Name']}>
                       {stock['Company Name']}
@@ -360,30 +346,50 @@ export default function Home() {
                   </div>
 
                   {stats ? (
-                    <div className="bg-white p-3 rounded-lg border border-gray-100 space-y-2 shadow-sm">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium text-gray-600">Win Rate:</span>
-                        <span className={`font-bold text-lg ${stats.winRate >= 80 ? 'text-green-600' : 'text-gray-800'}`}>
-                          {stats.winRate.toFixed(1)}%
-                        </span>
+                    <div className="flex-1 flex flex-col gap-4">
+                      {/* STATS SECTION */}
+                      <div className="bg-white p-3 rounded-lg border border-gray-100 space-y-2 shadow-sm">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-gray-600">Win Rate:</span>
+                          <span className={`font-bold text-lg ${stats.winRate >= 80 ? 'text-green-600' : 'text-gray-800'}`}>
+                            {stats.winRate.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-gray-600">Avg Reward:</span>
+                          <span className="font-bold text-green-600">+{stats.averageReturn.toFixed(2)}%</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-gray-600">Worst Drop:</span>
+                          <span className="font-bold text-red-600">{stats.maxDrawdown.toFixed(2)}%</span>
+                        </div>
                       </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium text-gray-600">Avg Reward:</span>
-                        <span className="font-bold text-green-600">+{stats.averageReturn.toFixed(2)}%</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium text-gray-600">Max Risk (Stop):</span>
-                        <span className="font-bold text-red-600">{stats.maxDrawdown.toFixed(2)}%</span>
-                      </div>
-                      <div className="text-xs text-gray-400 mt-2 text-right">
-                        Based on {stats.totalYearsCounted} years of data
+
+                      {/* EXECUTION PLAN SECTION */}
+                      <div className="bg-gray-900 p-4 rounded-lg shadow-sm mt-auto text-gray-100">
+                        <div className="text-xs uppercase font-bold text-gray-400 mb-3 tracking-wider border-b border-gray-700 pb-2">Execution Plan</div>
+                        
+                        <div className="space-y-3 text-sm">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-400">Entry (Market Open):</span>
+                            <span className="font-semibold text-white">1st of {MONTHS[selectedMonth]}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-400">Exit (Market Close):</span>
+                            <span className="font-semibold text-white">End of {MONTHS[selectedMonth]}</span>
+                          </div>
+                          <div className="flex justify-between items-center pt-2 border-t border-gray-700">
+                            <span className="text-red-400 font-medium">GTT Stop Loss:</span>
+                            <span className="font-bold text-red-400">{systemStopLoss.toFixed(2)}%</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ) : (
                     <button 
                       onClick={() => analyzeStock(symbol)}
                       disabled={isAnalyzing || isScanningAll}
-                      className="w-full py-2 px-4 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 disabled:bg-gray-300 transition-colors"
+                      className="w-full py-2 px-4 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 disabled:bg-gray-300 transition-colors mt-auto"
                     >
                       {isAnalyzing ? "Analyzing..." : `Analyze for ${MONTHS[selectedMonth]}`}
                     </button>
