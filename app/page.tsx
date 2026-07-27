@@ -21,12 +21,9 @@ export default function Home() {
   const [dashboardData, setDashboardData] = useState<StockData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  // Track seasonality data and loading states for individual stocks
   const [seasonalityCache, setSeasonalityCache] = useState<Record<string, SeasonalityResult>>({});
   const [analyzingSymbol, setAnalyzingSymbol] = useState<string | null>(null);
 
-  // For this system, we are targeting the upcoming month (August = index 7)
   const TARGET_MONTH = 7; 
   const TARGET_MONTH_NAME = "August";
 
@@ -52,7 +49,12 @@ export default function Home() {
     setAnalyzingSymbol(symbol);
     try {
       const response = await fetch(`/api/history?symbol=${symbol}`);
-      if (!response.ok) throw new Error("Failed to fetch history");
+      
+      // If the server fails, we extract the EXACT error message now
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Unknown server error");
+      }
       
       const history = await response.json();
       
@@ -61,10 +63,8 @@ export default function Home() {
       let worstDrop = 0;
       let validYears = 0;
 
-      // The Math Engine
       history.forEach((monthData: any) => {
         const date = new Date(monthData.date);
-        
         if (date.getMonth() === TARGET_MONTH) {
           validYears++;
           const open = monthData.open;
@@ -93,9 +93,10 @@ export default function Home() {
         }
       }));
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(`Error analyzing ${symbol}:`, error);
-      alert(`Could not analyze ${symbol}. Data might be unavailable.`);
+      // This will now pop up with the specific server error!
+      alert(`SYSTEM ERROR FOR ${symbol}:\n\n${error.message}`);
     } finally {
       setAnalyzingSymbol(null);
     }
