@@ -1,0 +1,16 @@
+name: Daily Stock Scan
+on:
+  schedule:
+    - cron: '30 08 * * *' # Runs every day at 8:30 AM
+  workflow_dispatch:      # Allows you to click "Run" manually from GitHub
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with: { node-version: '18' }
+      - run: npm install
+      - run: npx tsx scripts/full-market-scan.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
