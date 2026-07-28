@@ -8,6 +8,7 @@ interface BreakoutStock {
   fiveYearHigh: number;
   distancePerc: number;
   volumeRatio: number;
+  volume20SMA: string;
 }
 
 export default function MultiYearBO() {
@@ -47,14 +48,15 @@ export default function MultiYearBO() {
       if (!initRes.ok) throw new Error('Failed to initialize scan');
       const { stocks: stockList } = await initRes.json();
 
-      // 2. Chop the list into batches of 15 to bypass Vercel timeouts
-      const BATCH_SIZE = 15;
+      // 2. Safe Batching to prevent Vercel Timeouts (20 stocks takes ~4 seconds)
+      const BATCH_SIZE = 20; 
       let completed = 0;
 
       for (let i = 0; i < stockList.length; i += BATCH_SIZE) {
         const batch = stockList.slice(i, i + BATCH_SIZE);
         setScanProgress(`Scanning ${completed} of ${stockList.length} stocks...`);
         
+        // Send the small batch to the server
         await fetch('/api/scanner/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -62,6 +64,12 @@ export default function MultiYearBO() {
         });
         
         completed += batch.length;
+
+        // 3. THE COOL-DOWN PAUSE: Force the browser to wait 3 seconds before sending the next batch
+        if (completed < stockList.length) {
+            setScanProgress(`Cooling down to prevent Yahoo ban... (${completed}/${stockList.length})`);
+            await new Promise(resolve => setTimeout(resolve, 3000)); 
+        }
       }
 
       setScanProgress('Scan complete! Loading results...');
