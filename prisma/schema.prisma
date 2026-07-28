@@ -12,7 +12,9 @@ model PotentialBreakout {
   symbol           String
   companyName      String
   currentPrice     Float
+  highPrice        Float    // The breakout resistance level
   distanceFromHigh Float 
-  baseLengthMonths Int      // Added this line to store the base size
+  baseLengthMonths Int      
+  volumeSurge      Float    // Volume multiplier
   scannedAt        DateTime @default(now())
 }

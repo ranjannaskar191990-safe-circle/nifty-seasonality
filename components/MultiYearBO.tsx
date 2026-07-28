@@ -7,8 +7,10 @@ interface StockBreakout {
   symbol: string;
   companyName: string;
   currentPrice: number;
+  highPrice: number;
   distanceFromHigh: number;
   baseLengthMonths: number;
+  volumeSurge: number;
 }
 
 export default function MultiYearBO() {
@@ -111,10 +113,11 @@ export default function MultiYearBO() {
                 </p>
               </div>
 
-              <div className="mt-6 pt-4 border-t flex justify-between items-center">
+              {/* Stats Grid for Price, Breakout Level, and Volume */}
+              <div className="mt-6 pt-4 border-t grid grid-cols-2 gap-y-4">
                 <div>
                   <span className="text-xs text-gray-400 uppercase tracking-wider block">
-                    Current Price
+                    Current
                   </span>
                   <span className="font-bold text-gray-800 text-lg">
                     ₹{stock.currentPrice}
@@ -123,7 +126,25 @@ export default function MultiYearBO() {
 
                 <div className="text-right">
                   <span className="text-xs text-gray-400 uppercase tracking-wider block">
-                    Distance to Breakout
+                    Resistance
+                  </span>
+                  <span className="font-bold text-gray-800 text-lg">
+                    ₹{stock.highPrice}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-xs text-gray-400 uppercase tracking-wider block">
+                    Volume Surge
+                  </span>
+                  <span className={`font-extrabold text-sm ${stock.volumeSurge >= 1.5 ? 'text-blue-600' : 'text-gray-600'}`}>
+                    {stock.volumeSurge}x Avg
+                  </span>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-xs text-gray-400 uppercase tracking-wider block">
+                    Distance
                   </span>
                   <span
                     className={`font-extrabold text-base ${

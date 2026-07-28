@@ -52,8 +52,10 @@ async function runNightlyScan() {
     symbol: string;
     companyName: string;
     currentPrice: number;
+    highPrice: number;
     distanceFromHigh: number;
     baseLengthMonths: number;
+    volumeSurge: number;
   }> = [];
 
   // 2. Analyze each stock
@@ -68,12 +70,13 @@ async function runNightlyScan() {
 
       const data = await res.json();
       const quotes = data.chart?.result?.[0]?.indicators?.quote?.[0];
-      if (!quotes || !quotes.high || !quotes.close) continue;
+      if (!quotes || !quotes.high || !quotes.close || !quotes.volume) continue;
 
       const highs: number[] = quotes.high.filter((h: number | null) => h !== null);
       const closes: number[] = quotes.close.filter((c: number | null) => c !== null);
+      const volumes: number[] = quotes.volume.filter((v: number | null) => v !== null);
       
-      if (highs.length < 24 || closes.length < 24) continue;
+      if (highs.length < 24 || closes.length < 24 || volumes.length < 24) continue;
 
       // Find highest high excluding the last 2 months
       let ath = 0;
@@ -97,16 +100,24 @@ async function runNightlyScan() {
       const currentPrice = closes[closes.length - 1];
       const distanceFromHigh = ((currentPrice - ath) / ath) * 100;
 
+      // Calculate Volume Surge (Current Month vs Previous 6-Month Average)
+      const currentVolume = volumes[volumes.length - 1];
+      const previous6MonthsVolume = volumes.slice(-7, -1);
+      const avgVolume = previous6MonthsVolume.reduce((a, b) => a + b, 0) / 6;
+      const volumeSurge = avgVolume > 0 ? (currentVolume / avgVolume) : 0;
+
       // Criteria: Price >= 50, and within -20% to 0% of its base high
       if (currentPrice >= 50 && distanceFromHigh >= -20.0 && distanceFromHigh <= 0.0) {
         resultsToSave.push({
           symbol,
           companyName,
           currentPrice: parseFloat(currentPrice.toFixed(2)),
+          highPrice: parseFloat(ath.toFixed(2)),
           distanceFromHigh: parseFloat(distanceFromHigh.toFixed(2)),
           baseLengthMonths: monthsSinceATH,
+          volumeSurge: parseFloat(volumeSurge.toFixed(2)),
         });
-        console.log(`✅ Found Setup: ${symbol} (${monthsSinceATH} Month Base)`);
+        console.log(`✅ Found Setup: ${symbol} (${monthsSinceATH} Month Base | Vol: ${volumeSurge.toFixed(1)}x)`);
       }
     } catch (error) {
       // Ignore individual stock errors
