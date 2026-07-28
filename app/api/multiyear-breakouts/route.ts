@@ -1,23 +1,17 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 export async function GET() {
   try {
-    const breakouts = await prisma.multiYearBreakout.findMany({
-      orderBy: {
-        distancePerc: 'desc' // Sorts so the stocks closest to the breakout appear first
-      }
+    // Fetching from our NEW table, sorted by closest to breakout
+    const data = await prisma.potentialBreakout.findMany({
+      orderBy: { distanceFromHigh: 'desc' }
     });
-
-    // BigInt cannot be serialized to JSON automatically, so it must be converted to a string
-    const serializedBreakouts = breakouts.map(stock => ({
-      ...stock,
-      volume20SMA: stock.volume20SMA.toString()
-    }));
-
-    return NextResponse.json(serializedBreakouts);
+    return NextResponse.json(data);
   } catch (error) {
-    console.error('Fetch error:', error);
-    return NextResponse.json({ error: 'Failed to fetch breakouts from database' }, { status: 500 });
+    console.error("Database fetch error:", error);
+    return NextResponse.json({ error: "Failed to fetch breakouts" }, { status: 500 });
   }
 }
