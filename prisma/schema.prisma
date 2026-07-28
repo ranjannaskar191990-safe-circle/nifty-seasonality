@@ -35,3 +35,14 @@ model TradeJournal {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 }
+model MultiYearBreakout {
+  id              String   @id @default(cuid())
+  symbol          String   @unique
+  companyName     String
+  cmp             Float
+  fiveYearHigh    Float
+  distancePerc    Float
+  volumeRatio     Float
+  volume20SMA     BigInt
+  lastScannedAt   DateTime @default(now())
+}
