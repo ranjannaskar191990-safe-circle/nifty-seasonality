@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Papa from 'papaparse';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
+import MultiYearBO from '@/components/MultiYearBO';
 
 interface StockData { 'Company Name': string; 'Symbol': string; 'Industry': string; }
 interface YearlyReturn { year: number; return: number; }
@@ -11,7 +12,6 @@ interface SeasonalityResult { winRate: number; averageReturn: number; maxDrawdow
 interface IndexHealth { current: number; dma200: number; isHealthy: boolean; }
 interface RegimeData { nifty50: IndexHealth; nifty200: IndexHealth; isBullRegime: boolean; }
 
-// NEW: Interface for Trade Journal
 interface JournalEntry {
   id: string;
   symbol: string;
@@ -41,10 +41,9 @@ const calculateEMA = (data: any[], period: number) => {
 };
 
 export default function Home() {
-  // NEW: State for Tabs (scanner or journal)
-  const [activeTab, setActiveTab] = useState<'scanner' | 'journal'>('scanner');
+  // UPDATED: Added 'multiYearBO' to the activeTab state
+  const [activeTab, setActiveTab] = useState<'scanner' | 'journal' | 'multiYearBO'>('scanner');
   
-  // NEW: Journal State
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [isJournalLoading, setIsJournalLoading] = useState(false);
   const [newEntry, setNewEntry] = useState({
@@ -81,7 +80,7 @@ export default function Home() {
           fetch("/api/nifty"),
           fetch("/api/regime"),
           fetch("/api/portfolio"),
-          fetch("/api/journal") // Load Journal Data
+          fetch("/api/journal") 
         ]);
         
         if (niftyRes.ok) {
@@ -122,7 +121,6 @@ export default function Home() {
     initDashboard();
   }, []);
 
-  // NEW: Function to submit a journal entry
   async function handleJournalSubmit(e: React.FormEvent) {
     e.preventDefault();
     setIsJournalLoading(true);
@@ -135,7 +133,6 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         setJournalEntries([data.entry, ...journalEntries]);
-        // Reset form but keep the rules checked
         setNewEntry({
           symbol: '', tradeMonth: MONTHS[selectedMonth], entryDate: '', entryPrice: '', 
           allocatedAmount: '', noTradeGapMet: true, gttStopPlaced: true, 
@@ -345,7 +342,6 @@ export default function Home() {
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-gray-50 relative">
       
-      {/* MODAL REMAINS UNCHANGED */}
       {activeDetailedStock && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/80 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden border border-gray-200 flex flex-col">
@@ -381,7 +377,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* MAIN CONTENT AREA */}
       <main className="flex-1 overflow-y-auto">
         
         {/* TAB NAVIGATION */}
@@ -398,6 +393,13 @@ export default function Home() {
               className={`py-4 font-bold text-sm border-b-2 transition-colors ${activeTab === 'journal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
             >
               Trade Journal (Execution)
+            </button>
+            {/* NEW TAB BUTTON ADDED HERE */}
+            <button 
+              onClick={() => setActiveTab('multiYearBO')} 
+              className={`py-4 font-bold text-sm border-b-2 transition-colors ${activeTab === 'multiYearBO' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              Multi Year BO
             </button>
           </div>
         </div>
@@ -616,6 +618,7 @@ export default function Home() {
                     </div>
 
                     <div className="lg:col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Post-Mortem Notes (Optional)</label>
                       <button type="submit" disabled={isJournalLoading} className="px-6 py-3 bg-gray-900 text-white font-bold rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50">
                         {isJournalLoading ? 'Logging...' : 'Save Execution Record'}
                       </button>
@@ -664,6 +667,11 @@ export default function Home() {
                 </div>
 
               </div>
+            )}
+
+            {/* ---------------- NEW MULTI YEAR BO TAB ---------------- */}
+            {activeTab === 'multiYearBO' && (
+              <MultiYearBO />
             )}
 
           </div>
