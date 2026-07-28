@@ -4,8 +4,10 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = "postgresql://neondb_owner:npg_gpCrkWA42IoH@ep-wispy-wind-axaw9hpr.c-4.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+  url      = env("DATABASE_URL")
 }
+
+// --- Existing Tables ---
 
 model Portfolio {
   id              String   @id @default(uuid())
@@ -35,14 +37,22 @@ model TradeJournal {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 }
+
+// --- Scanner Tables ---
+
 model MultiYearBreakout {
-  id              String   @id @default(cuid())
-  symbol          String   @unique
-  companyName     String
-  cmp             Float
-  fiveYearHigh    Float
-  distancePerc    Float
-  volumeRatio     Float
-  volume20SMA     BigInt
-  lastScannedAt   DateTime @default(now())
+  id            String   @id @default(cuid())
+  symbol        String   @unique
+  companyName   String
+  cmp           Float
+  fiveYearHigh  Float
+  distancePerc  Float
+  volumeRatio   Float
+  volume20SMA   BigInt
+  lastScannedAt DateTime @default(now())
+}
+
+model ScanLog {
+  id      Int      @id @default(autoincrement())
+  lastRun DateTime @default(now())
 }
