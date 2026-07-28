@@ -41,7 +41,6 @@ const calculateEMA = (data: any[], period: number) => {
 };
 
 export default function Home() {
-  // UPDATED: Added 'multiYearBO' to the activeTab state
   const [activeTab, setActiveTab] = useState<'scanner' | 'journal' | 'multiYearBO'>('scanner');
   
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
@@ -154,8 +153,7 @@ export default function Home() {
   }
 
   async function toggleTrade(symbol: string) {
-    if (regime && !regime.isBullRegime) return; 
-
+    // Veto logic completely removed to allow manual overrides
     const monthPortfolio = portfolio[selectedMonth] || [];
     const isRemoving = monthPortfolio.includes(symbol);
     const requiredCapital = calculateAllocation(symbol);
@@ -214,7 +212,8 @@ export default function Home() {
   const calculateAllocation = (symbol: string) => {
     const stats = seasonalityCache[symbol];
     if (!stats) return 0;
-    const stopLossPercent = Math.abs(Math.min(stats.maxDrawdown - 1, -2));
+    // maxDrawdown now stores the calculated system stop loss directly
+    const stopLossPercent = Math.abs(stats.maxDrawdown);
     return Math.round(riskPerTrade / (stopLossPercent / 100));
   };
 
@@ -235,12 +234,14 @@ export default function Home() {
     }
   }
 
+  // UPDATED: MAE (Max Adverse Excursion) Intra-Month Low logic + 8% Cap
   async function analyzeStock(symbol: string, silent = false) {
     if (!silent) setAnalyzingSymbol(symbol);
     try {
       const response = await fetch(`/api/history?symbol=${symbol}`);
       const history = await response.json();
-      let wins = 0, totalReturnOnWins = 0, worstDrop = 0, validYears = 0;
+      
+      let wins = 0, totalReturnOnWins = 0, worstIntraMonthDip = 0, validYears = 0;
       const yearlyReturns: YearlyReturn[] = [];
 
       history.forEach((monthData: any) => {
@@ -249,10 +250,21 @@ export default function Home() {
           validYears++;
           const open = monthData.open;
           const close = monthData.close;
+          const low = monthData.low || monthData.close; // Fallback for low
+          
           const percentChange = ((close - open) / open) * 100;
+          const intraMonthDip = ((low - open) / open) * 100;
+          
           yearlyReturns.push({ year: date.getFullYear(), return: percentChange });
-          if (percentChange > 0) { wins++; totalReturnOnWins += percentChange; } 
-          else if (percentChange < worstDrop) { worstDrop = percentChange; }
+          
+          if (percentChange > 0) { 
+            wins++; 
+            totalReturnOnWins += percentChange; 
+            // Only measure dips on years that ended up winning
+            if (intraMonthDip < worstIntraMonthDip) {
+              worstIntraMonthDip = intraMonthDip;
+            }
+          }
         }
       });
 
@@ -260,10 +272,21 @@ export default function Home() {
       const dataCompletenessScore = (validYears / 10) * 100;
       const convictionScore = Math.round((winRate * 0.7) + (dataCompletenessScore * 0.3));
 
+      // Strategy math: Max Historical Dip + 1% Buffer, capped at max 8%
+      const rawStopLoss = worstIntraMonthDip - 1.0;
+      const systemStopLoss = Math.max(rawStopLoss, -8.0);
+
       yearlyReturns.sort((a, b) => a.year - b.year);
       setSeasonalityCache(prev => ({
         ...prev,
-        [symbol]: { winRate, averageReturn: wins > 0 ? (totalReturnOnWins / wins) : 0, maxDrawdown: worstDrop, totalYearsCounted: validYears, convictionScore, yearlyReturns }
+        [symbol]: { 
+          winRate, 
+          averageReturn: wins > 0 ? (totalReturnOnWins / wins) : 0, 
+          maxDrawdown: systemStopLoss, 
+          totalYearsCounted: validYears, 
+          convictionScore, 
+          yearlyReturns 
+        }
       }));
     } catch (error: any) {
       if (!silent) alert(`ERROR: ${error.message}`);
@@ -337,7 +360,6 @@ export default function Home() {
   };
 
   const chartData = getChartData();
-  const isMarketHealthy = regime ? regime.isBullRegime : true;
 
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-gray-50 relative">
@@ -394,7 +416,6 @@ export default function Home() {
             >
               Trade Journal (Execution)
             </button>
-            {/* NEW TAB BUTTON ADDED HERE */}
             <button 
               onClick={() => setActiveTab('multiYearBO')} 
               className={`py-4 font-bold text-sm border-b-2 transition-colors ${activeTab === 'multiYearBO' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
@@ -497,7 +518,7 @@ export default function Home() {
                         const symbol = stock['Symbol'];
                         const stats = seasonalityCache[symbol];
                         const isAnalyzing = analyzingSymbol === symbol;
-                        const systemStopLoss = stats ? Math.min(stats.maxDrawdown - 1, -2) : 0; 
+                        const systemStopLoss = stats ? stats.maxDrawdown : 0; 
                         const isSelectedForTrade = (portfolio[selectedMonth] || []).includes(symbol);
                         const isEarningsCleared = !!earningsCleared[symbol];
 
@@ -520,7 +541,6 @@ export default function Home() {
                                 <div className="bg-white p-3 rounded-lg border border-gray-100 space-y-2 shadow-sm">
                                   <div className="flex justify-between items-center"><span className="text-sm font-medium text-gray-600">Win Rate:</span><span className={`font-bold text-lg ${stats.winRate >= 80 ? 'text-green-600' : 'text-gray-800'}`}>{stats.winRate.toFixed(1)}%</span></div>
                                   <div className="flex justify-between items-center"><span className="text-sm font-medium text-gray-600">Avg Reward:</span><span className="font-bold text-green-600">+{stats.averageReturn.toFixed(2)}%</span></div>
-                                  <div className="flex justify-between items-center"><span className="text-sm font-medium text-gray-600">Worst Drop:</span><span className="font-bold text-red-600">{stats.maxDrawdown.toFixed(2)}%</span></div>
                                 </div>
 
                                 <div className="bg-gray-900 p-4 rounded-lg shadow-sm mt-auto text-gray-100">
@@ -530,7 +550,7 @@ export default function Home() {
                                     <div className="flex justify-between items-center"><span className="text-gray-400">Exit (Market Close):</span><span className="font-semibold text-white">End of {MONTHS[selectedMonth]}</span></div>
                                     <div className="flex justify-between items-center pt-2 border-t border-gray-700"><span className="text-yellow-500 font-medium">No-Trade Gap:</span><span className="font-bold text-yellow-500">Max +1.5%</span></div>
                                     <div className="flex justify-between items-center"><span className="text-green-400 font-medium">Profit Target:</span><span className="font-bold text-green-400">+{stats.averageReturn.toFixed(2)}%</span></div>
-                                    <div className="flex justify-between items-center"><span className="text-red-400 font-medium">GTT Stop Loss:</span><span className="font-bold text-red-400">{systemStopLoss.toFixed(2)}%</span></div>
+                                    <div className="flex justify-between items-center"><span className="text-red-400 font-medium">GTT Stop Loss (Dip + 1%):</span><span className="font-bold text-red-400">{systemStopLoss.toFixed(2)}%</span></div>
                                   </div>
                                   
                                   <label className="flex items-center gap-2 mt-4 text-xs font-medium bg-gray-800 p-2 rounded cursor-pointer hover:bg-gray-700 transition-colors">
@@ -540,10 +560,10 @@ export default function Home() {
 
                                   <button 
                                     onClick={() => toggleTrade(symbol)} 
-                                    disabled={!isMarketHealthy || !isEarningsCleared}
+                                    disabled={!isEarningsCleared}
                                     className={`w-full py-2.5 mt-3 rounded-md font-bold transition-all border ${isSelectedForTrade ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-700' : 'bg-transparent border-gray-500 text-gray-300 hover:bg-gray-800 hover:text-white'} disabled:opacity-40 disabled:cursor-not-allowed`}
                                   >
-                                    {!isMarketHealthy ? "Market Veto Active" : !isEarningsCleared ? "Clear Earnings First" : isSelectedForTrade ? `✓ Added to ${MONTHS[selectedMonth]}` : `+ Select to Trade`}
+                                    {!isEarningsCleared ? "Clear Earnings First" : isSelectedForTrade ? `✓ Added to ${MONTHS[selectedMonth]}` : `+ Select to Trade`}
                                   </button>
                                 </div>
                               </div>
@@ -618,7 +638,6 @@ export default function Home() {
                     </div>
 
                     <div className="lg:col-span-3">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Post-Mortem Notes (Optional)</label>
                       <button type="submit" disabled={isJournalLoading} className="px-6 py-3 bg-gray-900 text-white font-bold rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50">
                         {isJournalLoading ? 'Logging...' : 'Save Execution Record'}
                       </button>
