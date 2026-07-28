@@ -1,29 +1,36 @@
 name: Nightly Breakout Scan
 
 on:
+  # Allows you to trigger it manually from the GitHub Actions tab anytime
+  workflow_dispatch: 
+  
+  # The automated schedule (Runs at 15:30 UTC = 9:00 PM IST daily)
   schedule:
-    - cron: '30 15 * * *' # Runs at 15:30 UTC (9:00 PM IST) every day
-  workflow_dispatch:      # Allows you to click a button to run it manually
+    - cron: '30 15 * * *'
 
 jobs:
   run-scanner:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20' # Uses a modern Node version
 
       - name: Install Dependencies
         run: npm install
 
       - name: Generate Prisma Client
         run: npx prisma generate
-
-      - name: Run Nightly Scan Script
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Execute Nightly Scan Script
         run: npx tsx scripts/nightly-scan.ts
+        env:
+          # Passes your database URL from GitHub Secrets to the script
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
