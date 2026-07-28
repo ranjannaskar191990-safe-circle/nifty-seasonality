@@ -11,12 +11,21 @@ async function runNightlyScan() {
   await prisma.potentialBreakout.deleteMany({});
   console.log("🧹 Cleared old data.");
 
-  // 2. Fetch the FULL NSE Equity List
-  const nseRes = await fetch('https://archives.nseindia.com/content/equities/EQUITY_L.csv');
+  // 2. Fetch the FULL NSE Equity List (Disguised as a real browser)
+  const nseRes = await fetch('https://archives.nseindia.com/content/equities/EQUITY_L.csv', {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/csv'
+    }
+  });
   const csvText = await nseRes.text();
   
-  // Parse the CSV
-  const parsed = Papa.parse<any>(csvText, { header: true, skipEmptyLines: true });
+  // Parse the CSV & clean up NSE's messy column headers
+  const parsed = Papa.parse<any>(csvText, { 
+    header: true, 
+    skipEmptyLines: true,
+    transformHeader: (header) => header.trim() // Strips hidden spaces
+  });
   
   // 3. Filter for standard Equities only (ignore ETFs, bonds, SME stocks, etc.)
   const stocks = parsed.data.filter((s: any) => s.SYMBOL && s.SERIES === 'EQ');
