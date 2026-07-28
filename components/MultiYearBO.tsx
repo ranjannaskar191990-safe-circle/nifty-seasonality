@@ -33,12 +33,30 @@ export default function MultiYearBO() {
       });
   }, []);
 
-  // Filter stocks based on selected base threshold, then sort closest to breakout (descending distanceFromHigh)
   const filteredAndSortedStocks = useMemo(() => {
     return stocks
       .filter((stock) => stock.baseLengthMonths >= minBaseMonths)
       .sort((a, b) => b.distanceFromHigh - a.distanceFromHigh);
   }, [stocks, minBaseMonths]);
+
+  // NEW: Function to generate and download TradingView Watchlist format
+  const exportToTradingView = () => {
+    if (filteredAndSortedStocks.length === 0) return;
+    
+    // Format required by TradingView: NSE:SYMBOL1,NSE:SYMBOL2
+    const tvFormat = filteredAndSortedStocks.map(stock => `NSE:${stock.symbol}`).join(',');
+    
+    // Create a downloadable text file
+    const blob = new Blob([tvFormat], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `TV_Breakouts_${minBaseMonths}M_Base.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   if (loading) {
     return (
@@ -51,7 +69,7 @@ export default function MultiYearBO() {
   return (
     <div className="p-6 space-y-6">
       {/* Header Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Potential Breakouts</h2>
           <p className="text-sm text-gray-500">
@@ -59,29 +77,41 @@ export default function MultiYearBO() {
           </p>
         </div>
 
-        {/* Filter Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-gray-600 mr-1">Base Length:</span>
-          {[
-            { label: 'All', value: 0 },
-            { label: '> 12M', value: 12 },
-            { label: '> 24M', value: 24 },
-            { label: '> 36M', value: 36 },
-            { label: '> 48M', value: 48 },
-            { label: '> 60M', value: 60 },
-          ].map((filter) => (
-            <button
-              key={filter.value}
-              onClick={() => setMinBaseMonths(filter.value)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                minBaseMonths === filter.value
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {filter.label}
-            </button>
-          ))}
+        {/* Filter Buttons & Export */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-xl">
+            <span className="text-sm font-semibold text-gray-500 ml-2 mr-1">Base Length:</span>
+            {[
+              { label: 'All', value: 0 },
+              { label: '> 12M', value: 12 },
+              { label: '> 24M', value: 24 },
+              { label: '> 36M', value: 36 },
+              { label: '> 48M', value: 48 },
+              { label: '> 60M', value: 60 },
+            ].map((filter) => (
+              <button
+                key={filter.value}
+                onClick={() => setMinBaseMonths(filter.value)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                  minBaseMonths === filter.value
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+
+          {/* NEW: TradingView Export Button */}
+          <button 
+            onClick={exportToTradingView}
+            disabled={filteredAndSortedStocks.length === 0}
+            className="px-4 py-2 bg-gray-900 text-white text-sm font-bold rounded-xl shadow-sm hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Export to TradingView
+          </button>
         </div>
       </div>
 
@@ -100,7 +130,6 @@ export default function MultiYearBO() {
               className="border p-5 rounded-xl bg-white shadow-sm hover:shadow-md transition-shadow relative flex flex-col justify-between"
             >
               <div>
-                {/* Base Length Badge */}
                 <div className="absolute top-4 right-4 bg-purple-100 text-purple-700 text-xs font-bold px-2.5 py-1 rounded-md">
                   {stock.baseLengthMonths} Month Base
                 </div>
@@ -113,7 +142,7 @@ export default function MultiYearBO() {
                 </p>
               </div>
 
-              {/* Stats Grid for Price, Breakout Level, and Volume */}
+              {/* Stats Grid */}
               <div className="mt-6 pt-4 border-t grid grid-cols-2 gap-y-4">
                 <div>
                   <span className="text-xs text-gray-400 uppercase tracking-wider block">
