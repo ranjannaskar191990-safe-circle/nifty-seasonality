@@ -153,7 +153,6 @@ export default function Home() {
   }
 
   async function toggleTrade(symbol: string) {
-    // Veto logic completely removed to allow manual overrides
     const monthPortfolio = portfolio[selectedMonth] || [];
     const isRemoving = monthPortfolio.includes(symbol);
     const requiredCapital = calculateAllocation(symbol);
@@ -212,7 +211,6 @@ export default function Home() {
   const calculateAllocation = (symbol: string) => {
     const stats = seasonalityCache[symbol];
     if (!stats) return 0;
-    // maxDrawdown now stores the calculated system stop loss directly
     const stopLossPercent = Math.abs(stats.maxDrawdown);
     return Math.round(riskPerTrade / (stopLossPercent / 100));
   };
@@ -234,14 +232,13 @@ export default function Home() {
     }
   }
 
-  // UPDATED: MAE (Max Adverse Excursion) Intra-Month Low logic + 8% Cap
   async function analyzeStock(symbol: string, silent = false) {
     if (!silent) setAnalyzingSymbol(symbol);
     try {
       const response = await fetch(`/api/history?symbol=${symbol}`);
       const history = await response.json();
       
-      let wins = 0, totalReturnOnWins = 0, worstIntraMonthDip = 0, validYears = 0;
+      let wins = 0, totalReturnOnWins = 0, worstDrop = 0, validYears = 0;
       const yearlyReturns: YearlyReturn[] = [];
 
       history.forEach((monthData: any) => {
@@ -250,20 +247,16 @@ export default function Home() {
           validYears++;
           const open = monthData.open;
           const close = monthData.close;
-          const low = monthData.low || monthData.close; // Fallback for low
           
           const percentChange = ((close - open) / open) * 100;
-          const intraMonthDip = ((low - open) / open) * 100;
           
           yearlyReturns.push({ year: date.getFullYear(), return: percentChange });
           
           if (percentChange > 0) { 
             wins++; 
             totalReturnOnWins += percentChange; 
-            // Only measure dips on years that ended up winning
-            if (intraMonthDip < worstIntraMonthDip) {
-              worstIntraMonthDip = intraMonthDip;
-            }
+          } else if (percentChange < worstDrop) { 
+            worstDrop = percentChange; 
           }
         }
       });
@@ -271,17 +264,22 @@ export default function Home() {
       const winRate = validYears > 0 ? (wins / validYears) * 100 : 0;
       const dataCompletenessScore = (validYears / 10) * 100;
       const convictionScore = Math.round((winRate * 0.7) + (dataCompletenessScore * 0.3));
+      const averageReturn = wins > 0 ? (totalReturnOnWins / wins) : 0;
 
-      // Strategy math: Max Historical Dip + 1% Buffer, capped at max 8%
-      const rawStopLoss = worstIntraMonthDip - 1.0;
-      const systemStopLoss = Math.max(rawStopLoss, -8.0);
+      // NEW LOGIC: Max Drawdown + 1%, or Half Target if no Drawdown
+      let systemStopLoss = 0;
+      if (worstDrop < 0) {
+        systemStopLoss = worstDrop - 1.0;
+      } else {
+        systemStopLoss = -(averageReturn / 2);
+      }
 
       yearlyReturns.sort((a, b) => a.year - b.year);
       setSeasonalityCache(prev => ({
         ...prev,
         [symbol]: { 
           winRate, 
-          averageReturn: wins > 0 ? (totalReturnOnWins / wins) : 0, 
+          averageReturn, 
           maxDrawdown: systemStopLoss, 
           totalYearsCounted: validYears, 
           convictionScore, 
@@ -550,7 +548,7 @@ export default function Home() {
                                     <div className="flex justify-between items-center"><span className="text-gray-400">Exit (Market Close):</span><span className="font-semibold text-white">End of {MONTHS[selectedMonth]}</span></div>
                                     <div className="flex justify-between items-center pt-2 border-t border-gray-700"><span className="text-yellow-500 font-medium">No-Trade Gap:</span><span className="font-bold text-yellow-500">Max +1.5%</span></div>
                                     <div className="flex justify-between items-center"><span className="text-green-400 font-medium">Profit Target:</span><span className="font-bold text-green-400">+{stats.averageReturn.toFixed(2)}%</span></div>
-                                    <div className="flex justify-between items-center"><span className="text-red-400 font-medium">GTT Stop Loss (Dip + 1%):</span><span className="font-bold text-red-400">{systemStopLoss.toFixed(2)}%</span></div>
+                                    <div className="flex justify-between items-center"><span className="text-red-400 font-medium">GTT Stop Loss:</span><span className="font-bold text-red-400">{systemStopLoss.toFixed(2)}%</span></div>
                                   </div>
                                   
                                   <label className="flex items-center gap-2 mt-4 text-xs font-medium bg-gray-800 p-2 rounded cursor-pointer hover:bg-gray-700 transition-colors">
