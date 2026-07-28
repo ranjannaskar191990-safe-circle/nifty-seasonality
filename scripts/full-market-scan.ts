@@ -21,11 +21,13 @@ async function analyzeStock(symbol: string, companyName: string) {
     if (!result) return null;
 
     const quotes = result.indicators?.quote?.[0];
-    if (!quotes || !quotes.high || !quotes.close) return null;
+    if (!quotes || !quotes.high || !quotes.close || !quotes.volume) return null;
 
     const highs: number[] = quotes.high;
     const closes: number[] = quotes.close;
+    const volumes: number[] = quotes.volume;
 
+    // --- LOGIC: ATH ---
     let ath = 0;
     let athIndex = -1;
     for (let i = 0; i < highs.length - 2; i++) {
@@ -41,18 +43,34 @@ async function analyzeStock(symbol: string, companyName: string) {
     const cmp = closes[closes.length - 1];
     if (cmp < 50) return null;
 
-    // Momentum: Price must be higher than 3 months ago
+    // Momentum & Trend
     const priceThreeMonthsAgo = closes[closes.length - 4];
     if (cmp < priceThreeMonthsAgo) return null;
 
-    // Trend: Must be above 10-Month SMA
     const last10Closes = closes.slice(-11, -1);
     const tenMonthSMA = last10Closes.reduce((a, b) => (a || 0) + (b || 0), 0) / 10;
     if (cmp < tenMonthSMA) return null;
 
+    // --- VOLUME CALCULATION ---
+    const validVolumes = volumes.filter((v) => v !== null);
+    const last20Vols = validVolumes.slice(-21, -1);
+    const avgVol = last20Vols.reduce((a, b) => a + b, 0) / (last20Vols.length || 1);
+    const currentVol = validVolumes[validVolumes.length - 1] || 0;
+    const volumeRatio = avgVol > 0 ? currentVol / avgVol : 0;
+
     const dist = ((cmp - ath) / ath) * 100;
+    
+    // Zone: 0% to -20%
     if (dist <= 0.0 && dist >= -20.0) {
-      return { symbol, companyName, cmp, fiveYearHigh: ath, distancePerc: dist };
+      return { 
+        symbol, 
+        companyName, 
+        cmp, 
+        fiveYearHigh: ath, 
+        distancePerc: dist,
+        volumeRatio: parseFloat(volumeRatio.toFixed(1)),
+        volume20SMA: BigInt(Math.floor(avgVol))
+      };
     }
     return null;
   } catch (e) {
@@ -80,6 +98,9 @@ async function run() {
     }
     await sleep(250);
   }
+  
+  // Log the scan completion
+  await prisma.scanLog.create({ data: { lastRun: new Date() } });
   
   console.log('✅ Scan Complete.');
   process.exit(0);
