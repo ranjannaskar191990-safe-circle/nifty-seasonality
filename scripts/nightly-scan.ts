@@ -24,7 +24,7 @@ async function runNightlyScan() {
   const parsed = Papa.parse<any>(csvText, { 
     header: true, 
     skipEmptyLines: true,
-    transformHeader: (header) => header.trim() // Strips hidden spaces
+    transformHeader: (header) => header.trim()
   });
   
   // 3. Filter for standard Equities only (ignore ETFs, bonds, SME stocks, etc.)
@@ -84,6 +84,7 @@ async function runNightlyScan() {
             companyName: companyName,
             currentPrice: parseFloat(currentPrice.toFixed(2)),
             distanceFromHigh: parseFloat(distanceFromHigh.toFixed(2)),
+            baseLengthMonths: monthsSinceATH, // Saving the base length
           }
         });
         console.log(`✅ Found Breakout Setup: ${symbol} (Base: ${monthsSinceATH} months)`);

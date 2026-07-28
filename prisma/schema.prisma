@@ -7,12 +7,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Stores only the stocks that are ready to breakout
 model PotentialBreakout {
-  id           Int      @id @default(autoincrement())
-  symbol       String
-  companyName  String
-  currentPrice Float
-  distanceFromHigh Float // How far from the ATH
-  scannedAt    DateTime @default(now())
+  id               Int      @id @default(autoincrement())
+  symbol           String
+  companyName      String
+  currentPrice     Float
+  distanceFromHigh Float 
+  baseLengthMonths Int      // Added this line to store the base size
+  scannedAt        DateTime @default(now())
 }

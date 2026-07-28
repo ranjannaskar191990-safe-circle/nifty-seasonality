@@ -38,9 +38,15 @@ export default function MultiYearBO() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {stocks.map((stock) => (
-            <div key={stock.id} className="border p-4 rounded-xl bg-white shadow-sm hover:shadow-md transition-shadow">
-               <h3 className="font-bold text-lg text-gray-800">{stock.symbol}</h3>
-               <p className="text-sm text-gray-500 truncate">{stock.companyName}</p>
+            <div key={stock.id} className="border p-4 rounded-xl bg-white shadow-sm hover:shadow-md transition-shadow relative">
+               
+               {/* NEW: Base Length Badge */}
+               <div className="absolute top-4 right-4 bg-purple-100 text-purple-700 text-xs font-bold px-2 py-1 rounded-md">
+                 {stock.baseLengthMonths} Month Base
+               </div>
+
+               <h3 className="font-bold text-lg text-gray-800 pr-24">{stock.symbol}</h3>
+               <p className="text-sm text-gray-500 truncate w-3/4">{stock.companyName}</p>
                
                <div className="mt-4 pt-4 border-t flex justify-between items-center">
                  <span className="font-medium text-gray-700">₹{stock.currentPrice}</span>
