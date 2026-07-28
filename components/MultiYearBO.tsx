@@ -5,7 +5,7 @@ interface BreakoutStock {
   symbol: string;
   companyName: string;
   cmp: number;
-  fiveYearHigh: number;
+  fiveYearHigh: number; // Storing the 15Y ATH
   distancePerc: number;
   volumeRatio: number;
   volume20SMA: string;
@@ -47,7 +47,7 @@ export default function MultiYearBO() {
       if (!initRes.ok) throw new Error('Failed to initialize scan');
       const { stocks: stockList } = await initRes.json();
 
-      // YOUR RULE: Batch size of 75
+      // Batch size of 75 stocks
       const BATCH_SIZE = 75; 
       let completed = 0;
 
@@ -63,7 +63,7 @@ export default function MultiYearBO() {
         
         completed += batch.length;
 
-        // YOUR RULE: 5 second pause between batches
+        // 5 second pause between batches
         if (completed < stockList.length) {
             setScanProgress(`Cooling down (5s pause)... (${completed}/${stockList.length})`);
             await new Promise(resolve => setTimeout(resolve, 5000)); 
@@ -99,9 +99,9 @@ export default function MultiYearBO() {
 
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">15-Year Base Scanner</h2>
+          <h2 className="text-2xl font-bold text-gray-900">15-Year Potential Breakout Watchlist</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Filters applied: <span className="font-medium text-gray-700">Min Price ₹50</span> | Consolidation: <span className="font-medium text-gray-700">&gt; 5 Years</span>
+            Target Zone: <span className="font-medium text-gray-700">0% to 20% below 15Y High</span>
           </p>
         </div>
         
@@ -129,7 +129,7 @@ export default function MultiYearBO() {
 
       {stocks.length === 0 ? (
         <div className="p-12 text-center text-gray-500 bg-gray-50 rounded-lg border border-gray-200 shadow-sm flex flex-col items-center justify-center">
-          <p className="mb-4 text-lg font-medium text-gray-600">No stocks currently meet the decade-long breakout criteria.</p>
+          <p className="mb-4 text-lg font-medium text-gray-600">No stocks currently meet the criteria.</p>
           <p className="text-sm">Click the <strong>Run Full Market Scan</strong> button above to search 750 NSE stocks.</p>
         </div>
       ) : (
@@ -141,8 +141,9 @@ export default function MultiYearBO() {
                   <h3 className="font-bold text-lg text-gray-900">{stock.symbol}</h3>
                   <p className="text-xs text-gray-500 truncate max-w-[150px]" title={stock.companyName}>{stock.companyName}</p>
                 </div>
-                <span className={`text-xs font-bold px-2.5 py-1 rounded-md ${stock.distancePerc >= -1.5 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                  {stock.distancePerc.toFixed(2)}% to BO
+                {/* Hotness Badge: Green if within 5%, otherwise Yellow */}
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-md ${stock.distancePerc > -5.0 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                  {Math.abs(stock.distancePerc).toFixed(2)}% below High
                 </span>
               </div>
 

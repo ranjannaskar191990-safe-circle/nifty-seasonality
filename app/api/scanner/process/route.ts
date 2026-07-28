@@ -10,7 +10,7 @@ async function analyzeStockForBreakout(symbol: string, companyName: string) {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yfSymbol}?range=15y&interval=1mo`;
     
     const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) return null; // If Yahoo blocks it, we gracefully skip
+    if (!response.ok) return null; 
     
     const data = await response.json();
     const result = data.chart?.result?.[0];
@@ -36,6 +36,7 @@ async function analyzeStockForBreakout(symbol: string, companyName: string) {
 
     if (athIndex === -1) return null;
 
+    // TRUE CONSOLIDATION RULE: Did this ATH happen at least 5 years (60 months) ago?
     const monthsSinceATH = (lastValidIndex - athIndex) + 1;
     if (monthsSinceATH < 60) return null;
 
@@ -51,7 +52,8 @@ async function analyzeStockForBreakout(symbol: string, companyName: string) {
 
     const distancePerc = ((cmp - ath) / ath) * 100;
 
-    if (distancePerc >= -5.0 && distancePerc <= 2.0) {
+    // STRATEGY UPDATE: Accumulation Zone (Breakout level down to 20% below)
+    if (distancePerc <= 0.0 && distancePerc >= -20.0) {
       const validVolumes = volumes.filter((v: number | null) => v !== null);
       const historicalVolumes = validVolumes.slice(0, validVolumes.length - 1);
       const last20Vols = historicalVolumes.slice(-20);
@@ -81,17 +83,17 @@ export async function POST(request: Request) {
     const { batch } = await request.json();
     const validSetups = [];
     
-    // Process the 75 stocks SEQUENTIALLY, not all at once.
+    // Process sequentially to avoid Yahoo rate limits
     for (const stock of batch) {
       const result = await analyzeStockForBreakout(stock.symbol, stock.companyName);
       if (result) {
         validSetups.push(result);
       }
-      // 50ms micro-pause to prevent Yahoo from identifying a bot attack
+      // Micro-pause
       await sleep(50); 
     }
 
-    // Save only the breakouts to the database
+    // Save setups to database
     for (const setup of validSetups) {
       await prisma.multiYearBreakout.create({ data: setup });
     }
