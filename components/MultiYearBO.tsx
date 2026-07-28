@@ -42,21 +42,19 @@ export default function MultiYearBO() {
     setError('');
     
     try {
-      // 1. Get the full list of stocks and wipe the old database
       setScanProgress('Fetching Nifty Total Market list (750 stocks)...');
       const initRes = await fetch('/api/scanner/init');
       if (!initRes.ok) throw new Error('Failed to initialize scan');
       const { stocks: stockList } = await initRes.json();
 
-      // 2. Safe Batching to prevent Vercel Timeouts (20 stocks takes ~4 seconds)
-      const BATCH_SIZE = 20; 
+      // YOUR RULE: Batch size of 75
+      const BATCH_SIZE = 75; 
       let completed = 0;
 
       for (let i = 0; i < stockList.length; i += BATCH_SIZE) {
         const batch = stockList.slice(i, i + BATCH_SIZE);
-        setScanProgress(`Scanning ${completed} of ${stockList.length} stocks...`);
+        setScanProgress(`Scanning ${completed + batch.length} of ${stockList.length} stocks...`);
         
-        // Send the small batch to the server
         await fetch('/api/scanner/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -65,10 +63,10 @@ export default function MultiYearBO() {
         
         completed += batch.length;
 
-        // 3. THE COOL-DOWN PAUSE: Force the browser to wait 3 seconds before sending the next batch
+        // YOUR RULE: 5 second pause between batches
         if (completed < stockList.length) {
-            setScanProgress(`Cooling down to prevent Yahoo ban... (${completed}/${stockList.length})`);
-            await new Promise(resolve => setTimeout(resolve, 3000)); 
+            setScanProgress(`Cooling down (5s pause)... (${completed}/${stockList.length})`);
+            await new Promise(resolve => setTimeout(resolve, 5000)); 
         }
       }
 

@@ -1,12 +1,16 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
+// Utility to create a micro-pause
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function analyzeStockForBreakout(symbol: string, companyName: string) {
   try {
     const yfSymbol = `${symbol}.NS`; 
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yfSymbol}?range=15y&interval=1mo`;
+    
     const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) return null;
+    if (!response.ok) return null; // If Yahoo blocks it, we gracefully skip
     
     const data = await response.json();
     const result = data.chart?.result?.[0];
@@ -77,13 +81,14 @@ export async function POST(request: Request) {
     const { batch } = await request.json();
     const validSetups = [];
     
-    // Process the batch concurrently
-    const results = await Promise.all(
-      batch.map((stock: any) => analyzeStockForBreakout(stock.symbol, stock.companyName))
-    );
-
-    for (const result of results) {
-      if (result) validSetups.push(result);
+    // Process the 75 stocks SEQUENTIALLY, not all at once.
+    for (const stock of batch) {
+      const result = await analyzeStockForBreakout(stock.symbol, stock.companyName);
+      if (result) {
+        validSetups.push(result);
+      }
+      // 50ms micro-pause to prevent Yahoo from identifying a bot attack
+      await sleep(50); 
     }
 
     // Save only the breakouts to the database
@@ -91,7 +96,7 @@ export async function POST(request: Request) {
       await prisma.multiYearBreakout.create({ data: setup });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, processed: batch.length });
   } catch (error) {
     return NextResponse.json({ error: 'Batch processing failed' }, { status: 500 });
   }
