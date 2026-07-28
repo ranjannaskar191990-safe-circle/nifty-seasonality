@@ -23,6 +23,7 @@ async function analyzeStockForBreakout(symbol: string, companyName: string) {
     const closes = quotes.close;
     const volumes = quotes.volume;
 
+    // --- LOGIC: ATH & CONSOLIDATION ---
     let ath = 0;
     let athIndex = -1;
     const lastValidIndex = highs.length - 2; 
@@ -50,9 +51,18 @@ async function analyzeStockForBreakout(symbol: string, companyName: string) {
 
     if (cmp < 50) return null;
 
+    // --- LOGIC: MOMENTUM FILTER (Price must be higher than 3 months ago) ---
+    const priceThreeMonthsAgo = closes[closes.length - 4];
+    if (cmp < priceThreeMonthsAgo) return null;
+
+    // --- LOGIC: TREND FILTER (Must be above 10-Month SMA) ---
+    const last10Closes = closes.slice(-11, -1); 
+    const tenMonthSMA = last10Closes.reduce((a: any, b: any) => (a || 0) + (b || 0), 0) / 10;
+    if (cmp < tenMonthSMA) return null;
+
     const distancePerc = ((cmp - ath) / ath) * 100;
 
-    // STRATEGY UPDATE: Accumulation Zone (Breakout level down to 20% below)
+    // --- LOGIC: ACCUMULATION ZONE (0% to -20%) ---
     if (distancePerc <= 0.0 && distancePerc >= -20.0) {
       const validVolumes = volumes.filter((v: number | null) => v !== null);
       const historicalVolumes = validVolumes.slice(0, validVolumes.length - 1);
