@@ -7,52 +7,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- Existing Tables ---
-
-model Portfolio {
-  id              String   @id @default(uuid())
-  userId          String
-  symbol          String
-  targetMonth     Int
-  requiredCapital Int
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-}
-
-model TradeJournal {
-  id              String    @id @default(uuid())
-  userId          String
-  symbol          String
-  tradeMonth      String
-  noTradeGapMet   Boolean
-  gttStopPlaced   Boolean
-  earningsCleared Boolean
-  entryDate       DateTime
-  entryPrice      Float
-  exitDate        DateTime?
-  exitPrice       Float?
-  allocatedAmount Float
-  netPnL          Float?
-  notes           String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-}
-
-// --- Scanner Tables ---
-
-model MultiYearBreakout {
-  id            String   @id @default(cuid())
-  symbol        String   @unique
-  companyName   String
-  cmp           Float
-  fiveYearHigh  Float
-  distancePerc  Float
-  volumeRatio   Float
-  volume20SMA   BigInt
-  lastScannedAt DateTime @default(now())
-}
-
-model ScanLog {
-  id      Int      @id @default(autoincrement())
-  lastRun DateTime @default(now())
+// Stores only the stocks that are ready to breakout
+model PotentialBreakout {
+  id           Int      @id @default(autoincrement())
+  symbol       String
+  companyName  String
+  currentPrice Float
+  distanceFromHigh Float // How far from the ATH
+  scannedAt    DateTime @default(now())
 }

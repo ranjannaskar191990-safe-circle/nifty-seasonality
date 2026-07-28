@@ -1,0 +1,29 @@
+name: Nightly Breakout Scan
+
+on:
+  schedule:
+    - cron: '30 15 * * *' # Runs at 15:30 UTC (9:00 PM IST) every day
+  workflow_dispatch:      # Allows you to click a button to run it manually
+
+jobs:
+  run-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Run Nightly Scan Script
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/nightly-scan.ts
