@@ -8,17 +8,16 @@ interface BreakoutStock {
   fiveYearHigh: number;
   distancePerc: number;
   volumeRatio: number;
-  volume20SMA: string;
-  lastScannedAt: string;
 }
 
 export default function MultiYearBO() {
   const [stocks, setStocks] = useState<BreakoutStock[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [isScanning, setIsScanning] = useState(false); // New state for the scanner button
+  
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState('');
 
-  // Function to load data from the database
   const fetchBreakouts = async () => {
     try {
       const res = await fetch('/api/multiyear-breakouts');
@@ -33,25 +32,45 @@ export default function MultiYearBO() {
     }
   };
 
-  // Load data on initial render
   useEffect(() => {
     fetchBreakouts();
   }, []);
 
-  // NEW: Function to trigger the scanner API
-  const runScanner = async () => {
+  const runFullMarketScan = async () => {
     setIsScanning(true);
     setError('');
+    
     try {
-      const res = await fetch('/api/cron/scan-breakouts');
-      if (!res.ok) throw new Error('Scanner API failed to complete. It may have timed out.');
-      
-      // If the scan is successful, fetch the fresh data from the database
+      // 1. Get the full list of stocks and wipe the old database
+      setScanProgress('Fetching Nifty Total Market list (750 stocks)...');
+      const initRes = await fetch('/api/scanner/init');
+      if (!initRes.ok) throw new Error('Failed to initialize scan');
+      const { stocks: stockList } = await initRes.json();
+
+      // 2. Chop the list into batches of 15 to bypass Vercel timeouts
+      const BATCH_SIZE = 15;
+      let completed = 0;
+
+      for (let i = 0; i < stockList.length; i += BATCH_SIZE) {
+        const batch = stockList.slice(i, i + BATCH_SIZE);
+        setScanProgress(`Scanning ${completed} of ${stockList.length} stocks...`);
+        
+        await fetch('/api/scanner/process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batch })
+        });
+        
+        completed += batch.length;
+      }
+
+      setScanProgress('Scan complete! Loading results...');
       await fetchBreakouts();
     } catch (err: any) {
       setError(`Scan Error: ${err.message}`);
     } finally {
       setIsScanning(false);
+      setScanProgress('');
     }
   };
 
@@ -74,7 +93,7 @@ export default function MultiYearBO() {
 
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Multi-Year Breakout Scanner</h2>
+          <h2 className="text-2xl font-bold text-gray-900">15-Year Base Scanner</h2>
           <p className="text-sm text-gray-500 mt-1">
             Filters applied: <span className="font-medium text-gray-700">Min Price ₹50</span> | Consolidation: <span className="font-medium text-gray-700">&gt; 5 Years</span>
           </p>
@@ -85,19 +104,18 @@ export default function MultiYearBO() {
             {stocks.length} Setups Found
           </span>
           
-          {/* NEW: The Scan Button */}
           <button 
-            onClick={runScanner} 
+            onClick={runFullMarketScan} 
             disabled={isScanning}
-            className="px-5 py-2 bg-gray-900 text-white font-bold rounded-lg hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center shadow-sm"
+            className="px-5 py-2 bg-gray-900 text-white font-bold rounded-lg hover:bg-gray-800 transition-colors disabled:bg-gray-400 flex items-center shadow-sm min-w-[200px] justify-center"
           >
             {isScanning ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                Scanning NSE...
-              </>
+              <div className="flex flex-col items-center">
+                <div className="text-sm">Scanning Market...</div>
+                <div className="text-xs font-normal text-gray-300">{scanProgress}</div>
+              </div>
             ) : (
-              "Run 15-Year Scan"
+              "Run Full Market Scan"
             )}
           </button>
         </div>
@@ -106,7 +124,7 @@ export default function MultiYearBO() {
       {stocks.length === 0 ? (
         <div className="p-12 text-center text-gray-500 bg-gray-50 rounded-lg border border-gray-200 shadow-sm flex flex-col items-center justify-center">
           <p className="mb-4 text-lg font-medium text-gray-600">No stocks currently meet the decade-long breakout criteria.</p>
-          <p className="text-sm">Click the <strong>Run 15-Year Scan</strong> button above to search the market.</p>
+          <p className="text-sm">Click the <strong>Run Full Market Scan</strong> button above to search 750 NSE stocks.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
